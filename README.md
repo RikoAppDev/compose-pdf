@@ -61,13 +61,15 @@ Latin Extended-A/B, such as Noto Sans or DejaVu Sans.
 ## Building & testing
 
 ```
-./gradlew :composepdf:jvmTest                          # identity + feature gates
+./gradlew :composepdf:jvmTest                          # identity + feature gates (incl. cross-platform golden)
 ./gradlew :composepdf:compileCommonMainKotlinMetadata  # shared-code purity check
 ./gradlew :composepdf:compileAndroidMain               # Android target
+./gradlew :composepdf:iosSimulatorArm64Test            # runs the golden on iOS (macOS only)
 ```
-Requires JDK 17+. Generated test PDFs/PNGs are written under `composepdf/build/`.
+Requires JDK 17+ (CI uses 21). The cross-platform golden test runs the layout engine over a fixed
+document with deterministic metrics and asserts identical integer glyph origins on every platform.
+Generated test PDFs/PNGs are written under `composepdf/build/`.
 
 ## Roadmap
 
-- iOS native build + cross-platform golden-image comparison.
 - Additional table / report layouts.

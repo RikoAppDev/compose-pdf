@@ -35,7 +35,9 @@ jobs:
           name: jvm-test-report
           path: composepdf/build/reports/tests/jvmTest
 
-  # macOS runner can cross-compile the Apple targets — proves the shared engine builds natively on iOS.
+  # macOS runner cross-compiles the Apple device targets and RUNS the common tests on an iOS
+  # simulator — the cross-platform golden test executing natively on iOS is the empirical proof
+  # that layout is identical to JVM/Android down to every glyph origin.
   ios:
     runs-on: macos-latest
     steps:
@@ -50,7 +52,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Compile iOS targets
+      - name: Compile iOS device targets + run iOS tests (cross-platform golden)
         run: |
           chmod +x ./gradlew
-          ./gradlew :composepdf:compileKotlinIosArm64 :composepdf:compileKotlinIosX64 :composepdf:compileKotlinIosSimulatorArm64 --no-configuration-cache
+          ./gradlew :composepdf:compileKotlinIosArm64 :composepdf:compileKotlinIosX64 :composepdf:iosSimulatorArm64Test --no-configuration-cache
