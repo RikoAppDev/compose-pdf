@@ -22,7 +22,7 @@ internal class TextOp(
     val color: PdfColor,
 ) : DrawOp
 
-/** A filled and/or stroked rectangle. Top-left at (x, y). */
+/** A filled and/or stroked rectangle. Top-left at (x, y). [cornerRadiusPt] > 0 rounds the corners. */
 internal class RectOp(
     val xPt: Int,
     val yPt: Int,
@@ -31,6 +31,7 @@ internal class RectOp(
     val fill: PdfColor?,
     val stroke: PdfColor?,
     val strokeWidthPt: Int,
+    val cornerRadiusPt: Int = 0,
 ) : DrawOp
 
 /**

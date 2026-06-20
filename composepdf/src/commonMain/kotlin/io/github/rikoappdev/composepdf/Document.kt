@@ -92,6 +92,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
         border: Dp = 0.dp,
         borderColor: PdfColor = Color(0xFF6C757D),
         background: PdfColor? = null,
+        cornerRadius: Dp = 0.dp,
         build: ContainerScope.() -> Unit,
     ) {
         nodes.add(
@@ -101,6 +102,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
                 borderPt = border.value,
                 borderColor = borderColor,
                 background = background,
+                cornerRadiusPt = cornerRadius.value,
             )
         )
     }
@@ -142,6 +144,8 @@ open class ContainerScope internal constructor(internal val images: MutableList<
         zebra: PdfColor? = null,
         gridColor: PdfColor = Color(0xFFDDDDDD),
         cellPadding: Dp = 4.dp,
+        cellPaddingHorizontal: Dp = cellPadding,
+        cellPaddingVertical: Dp = cellPadding,
         repeatHeader: Boolean = true,
         build: TableScope.() -> Unit,
     ) {
@@ -152,8 +156,8 @@ open class ContainerScope internal constructor(internal val images: MutableList<
                 rows = scope.rows,
                 headerStyle = headerStyle,
                 headerBackground = headerBackground,
-                cellPadHPt = cellPadding.value,
-                cellPadVPt = cellPadding.value,
+                cellPadHPt = cellPaddingHorizontal.value,
+                cellPadVPt = cellPaddingVertical.value,
                 gridColor = gridColor,
                 repeatHeader = repeatHeader,
             )
@@ -179,6 +183,11 @@ class TableScope internal constructor(
     fun row(vararg cells: String) { rows.add(TableRow(cells.toList(), cellStyle, nextBodyBackground())) }
     fun row(cells: List<String>) { rows.add(TableRow(cells, cellStyle, nextBodyBackground())) }
     fun totalRow(vararg cells: String) { rows.add(TableRow(cells.toList(), totalStyle, totalBackground)) }
+
+    /** A bold total/summary row with an explicit [background] (e.g. a distinct grand-total colour). */
+    fun totalRow(cells: List<String>, background: PdfColor? = totalBackground) {
+        rows.add(TableRow(cells, totalStyle, background))
+    }
 }
 
 /** Distributes width across weighted cells (like `Modifier.weight`). */
@@ -244,6 +253,7 @@ private class BoxFrame(
     val borderPt: Int,
     val borderColor: PdfColor,
     val background: PdfColor?,
+    val cornerRadiusPt: Int,
     val depth: Int,
     var fragTop: Int,
 )
@@ -296,10 +306,10 @@ private class Flow(
         val height = bottom - top
         if (height <= 0) return
         if (b.background != null) {
-            backgrounds.add(Triple(pages.size - 1, b.depth, RectOp(b.x, top, b.width, height, fill = b.background, stroke = null, strokeWidthPt = 0)))
+            backgrounds.add(Triple(pages.size - 1, b.depth, RectOp(b.x, top, b.width, height, fill = b.background, stroke = null, strokeWidthPt = 0, cornerRadiusPt = b.cornerRadiusPt)))
         }
         if (b.borderPt > 0) {
-            page.ops.add(RectOp(b.x, top, b.width, height, fill = null, stroke = b.borderColor, strokeWidthPt = b.borderPt))
+            page.ops.add(RectOp(b.x, top, b.width, height, fill = null, stroke = b.borderColor, strokeWidthPt = b.borderPt, cornerRadiusPt = b.cornerRadiusPt))
         }
     }
 
@@ -383,7 +393,7 @@ private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig
                 if (boxH <= ctx.usableBottom - ctx.topY && ctx.y + boxH > ctx.usableBottom) ctx.newPage()
             }
             if (ctx.y > ctx.topY && ctx.roomLeft() < MIN_BOX_OPEN_ROOM_PT) ctx.newPage()
-            val frame = BoxFrame(x, availW, pad, node.borderPt, node.borderColor, node.background, ctx.depth, ctx.y)
+            val frame = BoxFrame(x, availW, pad, node.borderPt, node.borderColor, node.background, node.cornerRadiusPt, ctx.depth, ctx.y)
             ctx.openBox(frame)
             flowNode(node.child, x + pad, (availW - 2 * pad).coerceAtLeast(0), ctx, cfg)
             ctx.closeBox(frame)
