@@ -25,6 +25,7 @@ to users.
 - **Compose-style DSL**: `text`, `spacer`, `divider`, `row { cell(weight) { } }`, `column`, `box(padding, border, background)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through, cover-crop), `table` (weighted columns, repeating header, total rows), repeating `header`/`footer` bands + page numbers.
 - Familiar value types: `TextStyle`, `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight`, `TextAlign`.
 - **Automatic pagination**: paragraphs split by line; tables split by row repeating the header; containers flow across pages.
+- **FlateDecode compression**: content streams, the subset font program and the ToUnicode CMap are deflated by a pure-Kotlin encoder (deterministic on every platform).
 - Regular + Bold faces (bundled).
 
 ```kotlin
@@ -49,7 +50,6 @@ Requires JDK 17+. Generated test PDFs/PNGs are written under `composepdf/build/`
 
 ## Roadmap
 
-- FlateDecode compression for smaller files.
 - Bundled-font convenience (no need to pass font bytes explicitly).
 - iOS native build + cross-platform golden-image comparison.
 - Additional table / report layouts.

@@ -26,8 +26,8 @@ internal fun emitType0Font(
     fun scale(v: Int): Int = (v.toLong() * 1000 / upm).toInt()
     fun width1000(gid: Int): Int = ((font.advanceWidth(gid).toLong() * 1000 + upm / 2) / upm).toInt()
 
-    val fontFile2 = doc.add(streamObject("/Length1 ${subset.bytes.size}", subset.bytes))
-    val toUnicode = doc.add(streamObject("", asciiBytes(buildToUnicode(sorted, gidToCp))))
+    val fontFile2 = doc.add(streamObject("/Length1 ${subset.bytes.size}", subset.bytes, compress = true))
+    val toUnicode = doc.add(streamObject("", asciiBytes(buildToUnicode(sorted, gidToCp)), compress = true))
 
     val descriptor = doc.addDict(
         "<< /Type /FontDescriptor /FontName /$baseFont /Flags 32 " +
