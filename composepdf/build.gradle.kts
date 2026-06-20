@@ -85,14 +85,6 @@ publishing {
     }
     repositories {
         maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/RikoAppDev/compose-pdf")
-            credentials {
-                username = System.getenv("GITHUB_ACTOR") ?: (findProperty("gpr.user") as String? ?: "")
-                password = System.getenv("GITHUB_TOKEN") ?: (findProperty("gpr.token") as String? ?: "")
-            }
-        }
-        maven {
             name = "MavenCentral"
             url = uri("https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/")
             credentials {
