@@ -34,8 +34,16 @@ enum class PageSize(val widthPt: Int, val heightPt: Int) {
 class PageConfig(
     val size: PageSize = PageSize.A4,
     val margin: Dp = 36.dp,
+    /** Auto page-number line at the bottom of every page. Its vertical space is reserved so content
+     *  never overlaps it. Combine freely with a custom [ContainerScope.footer] band (footer sits
+     *  above the number). */
     val pageNumbers: Boolean = true,
     val pageNumberStyle: TextStyle = TextStyle(fontSize = 8.sp, color = Color(0xFF7F807F), align = TextAlign.Center),
+    /** Formats the page-number label, e.g. `{ page, total -> "Page $page of $total" }`. */
+    val pageNumberFormat: (page: Int, total: Int) -> String = { page, total -> "$page / $total" },
+    /** When true (default) the `header` band repeats on every page; when false it appears only on the
+     *  first page and later pages reclaim that space (like a title block in Word / Google Docs). */
+    val repeatHeader: Boolean = true,
     /**
      * When true (default), a paragraph that fits within a single page is moved **whole** to the next
      * page instead of being split, when it doesn't fit the remaining space — so a block never leaves
@@ -105,12 +113,16 @@ open class ContainerScope internal constructor(internal val images: MutableList<
         nodes.add(ImageNode(index, width.value, height.value, info.width, info.height, cover))
     }
 
-    /** Lays out [photos] (JPEG bytes) in a grid of [perRow] equal cells, each [cellHeight] tall. */
-    fun photoGrid(photos: List<ByteArray>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp) {
+    /**
+     * Lays out [photos] (JPEG bytes) in a grid of [perRow] equal cells, each [cellHeight] tall.
+     * [cover] = true crops each photo to fill its cell; false fits the whole photo inside the cell
+     * preserving its original aspect ratio (letterboxed, nothing cropped).
+     */
+    fun photoGrid(photos: List<ByteArray>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, cover: Boolean = true) {
         photos.chunked(perRow).forEachIndexed { rowIndex, chunk ->
             if (rowIndex > 0) spacer(gap)
             row(gap) {
-                chunk.forEach { bytes -> cell(1f) { image(bytes, width = 0.dp, height = cellHeight, cover = true) } }
+                chunk.forEach { bytes -> cell(1f) { image(bytes, width = 0.dp, height = cellHeight, cover = cover) } }
                 repeat(perRow - chunk.size) { cell(1f) {} } // pad to keep cells aligned
             }
         }
@@ -243,12 +255,15 @@ private class BoxFrame(
 private class Flow(
     val w: Int,
     val h: Int,
-    val topY: Int,
+    private val firstTopY: Int,
+    private val otherTopY: Int,
     val usableBottom: Int,
     val book: TextMetrics,
 ) {
     val pages = ArrayList<Page>()
     var page = Page(w, h).also { pages.add(it) }
+    var topY = firstTopY   // content top on the current page (later pages may reclaim header space)
+        private set
     var y = topY
     private val openBoxes = ArrayList<BoxFrame>()
     private val backgrounds = ArrayList<Triple<Int, Int, RectOp>>() // (pageIndex, depth, rect)
@@ -259,6 +274,7 @@ private class Flow(
     fun newPage() {
         for (b in openBoxes) emitFragment(b, b.fragTop, usableBottom)
         page = Page(w, h).also { pages.add(it) }
+        topY = otherTopY
         y = topY
         for (b in openBoxes) { b.fragTop = y; y += b.padPt }
     }
@@ -305,19 +321,31 @@ internal fun layout(spec: PdfDocumentSpec, book: TextMetrics): List<Page> {
     // Repeating bands reserve space at the top/bottom; the flow lives between them.
     val headerP = spec.headerNodes?.let { measure(ColumnNode(it, 0), contentW, book) }
     val footerP = spec.footerNodes?.let { measure(ColumnNode(it, 0), contentW, book) }
-    val topY = m + (headerP?.let { it.heightPt + BAND_GAP_PT } ?: 0)
-    val usableBottom = h - m - (footerP?.let { it.heightPt + BAND_GAP_PT } ?: 0)
+    val headerReserve = headerP?.let { it.heightPt + BAND_GAP_PT } ?: 0
+    val footerH = footerP?.heightPt ?: 0
+    val pnH = if (cfg.pageNumbers) (cfg.pageNumberStyle.fontSize.value * cfg.pageNumberStyle.lineHeightMultiple).toInt() else 0
+    // Reserve the bottom band so content never overlaps the footer / page number.
+    val bottomReserve = footerH + pnH +
+        (if (footerH > 0 && pnH > 0) BAND_GAP_PT else 0) +
+        (if (footerH > 0 || pnH > 0) BAND_GAP_PT else 0)
 
-    val ctx = Flow(w, h, topY, usableBottom, book)
+    val firstTopY = m + headerReserve
+    val otherTopY = m + (if (cfg.repeatHeader) headerReserve else 0)
+    val usableBottom = h - m - bottomReserve
+
+    val ctx = Flow(w, h, firstTopY, otherTopY, usableBottom, book)
     for (node in spec.nodes) flowNode(node, m, contentW, ctx, cfg)
     val pages = ctx.finish()
 
-    // Repeat the header/footer bands on every page (placers are reusable across pages).
-    for (p in pages) {
-        headerP?.place(m, m, p.ops)
-        footerP?.place(m, h - m - footerP.heightPt, p.ops)
+    // Header: first page always; later pages only if it repeats.
+    for ((i, p) in pages.withIndex()) {
+        if (headerP != null && (i == 0 || cfg.repeatHeader)) headerP.place(m, m, p.ops)
     }
-    if (cfg.pageNumbers) addPageNumbers(pages, book, cfg)
+    // Footer band then the page-number line, stacked just below the content area.
+    val footerTop = usableBottom + BAND_GAP_PT
+    val pnTop = footerTop + (if (footerH > 0) footerH + (if (pnH > 0) BAND_GAP_PT else 0) else 0)
+    if (footerP != null) for (p in pages) footerP.place(m, footerTop, p.ops)
+    if (cfg.pageNumbers) addPageNumbers(pages, book, cfg, pnTop)
     return pages
 }
 
@@ -413,14 +441,15 @@ private fun flowTable(node: TableNode, x: Int, availW: Int, ctx: Flow, cfg: Page
     }
 }
 
-private fun addPageNumbers(pages: List<Page>, book: TextMetrics, cfg: PageConfig) {
+private fun addPageNumbers(pages: List<Page>, book: TextMetrics, cfg: PageConfig, topYForNumber: Int) {
     val style = cfg.pageNumberStyle
     val fs = style.fontSize.value
     val weight = style.fontWeight
     val m = cfg.margin.value
+    val ascent = book.ascentPt(weight, fs)
     val total = pages.size
     for ((i, p) in pages.withIndex()) {
-        val gids = book.shape("${i + 1} / $total", weight)
+        val gids = book.shape(cfg.pageNumberFormat(i + 1, total), weight)
         val tw = book.widthOfPt(gids, weight, fs)
         val contentW = p.widthPt - 2 * m
         val x = when (style.align) {
@@ -428,6 +457,6 @@ private fun addPageNumbers(pages: List<Page>, book: TextMetrics, cfg: PageConfig
             TextAlign.Center -> m + (contentW - tw) / 2
             TextAlign.End -> m + (contentW - tw)
         }
-        p.ops.add(TextOp(x, p.heightPt - m + fs, gids, weight, fs, style.color))
+        p.ops.add(TextOp(x, topYForNumber + ascent, gids, weight, fs, style.color))
     }
 }
