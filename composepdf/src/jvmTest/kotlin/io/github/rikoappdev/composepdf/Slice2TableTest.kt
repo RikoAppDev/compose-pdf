@@ -11,8 +11,8 @@ import kotlin.test.assertTrue
 /** Tables — weighted columns, dark header, total row, multi-page with a repeating header. */
 class Slice2TableTest {
 
-    private fun regular() = File("src/commonMain/resources/font/NotoSans-Regular.ttf").readBytes()
-    private fun bold() = File("src/commonMain/resources/font/NotoSans-Bold.ttf").readBytes()
+    private fun regular() = File("src/jvmTest/resources/font/NotoSans-Regular.ttf").readBytes()
+    private fun bold() = File("src/jvmTest/resources/font/NotoSans-Bold.ttf").readBytes()
 
     @Test
     fun multiPageTableRepeatsHeader() {

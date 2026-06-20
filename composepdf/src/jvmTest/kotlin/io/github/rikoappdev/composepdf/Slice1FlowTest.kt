@@ -11,8 +11,8 @@ import kotlin.test.assertTrue
 /** Multi-line text flow, alignment, bold, and automatic pagination. */
 class Slice1FlowTest {
 
-    private fun regular() = File("src/commonMain/resources/font/NotoSans-Regular.ttf").readBytes()
-    private fun bold() = File("src/commonMain/resources/font/NotoSans-Bold.ttf").readBytes()
+    private fun regular() = File("src/jvmTest/resources/font/NotoSans-Regular.ttf").readBytes()
+    private fun bold() = File("src/jvmTest/resources/font/NotoSans-Bold.ttf").readBytes()
 
     private val lorem =
         "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor " +

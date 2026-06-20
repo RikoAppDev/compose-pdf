@@ -171,7 +171,15 @@ class PdfDocumentSpec internal constructor(
     internal val headerNodes: List<Node>?,
     internal val footerNodes: List<Node>?,
 ) {
-    /** Renders to PDF bytes using the supplied Regular + Bold TrueType fonts. */
+    /**
+     * Renders to PDF bytes using the supplied Regular + Bold TrueType fonts.
+     *
+     * Fonts are supplied by the caller (the application), not bundled in the library: the app picks
+     * a default and can let the user choose another, then passes the chosen face bytes here. This
+     * keeps the engine font-agnostic and dependency-free, and works identically on every platform
+     * (the app reads its own bundled `.ttf` via its resource mechanism). Only the glyphs a document
+     * uses are subset and embedded.
+     */
     fun render(regularFontBytes: ByteArray, boldFontBytes: ByteArray): ByteArray {
         val book = FontBook(regularFontBytes, boldFontBytes)
         return serializePdf(layout(this, book), book, images)

@@ -39,6 +39,25 @@ val pdf: ByteArray = pdfDocument(PageConfig(margin = 36.dp)) {
 }.render(regularFontBytes, boldFontBytes)
 ```
 
+## Fonts
+
+Fonts are supplied by **your application**, not bundled in the library. `render` takes the Regular
+and Bold face bytes; the engine subsets and embeds only the glyphs a document uses. This keeps the
+library font-agnostic and dependency-free, and gives identical output on every platform — the app
+reads its own `.ttf` (via Compose Resources, Android assets, a file, the network, …) and passes the
+bytes in.
+
+A typical app keeps one **default** face and optionally lets the user pick another for export:
+
+```kotlin
+val regular: ByteArray = loadFont(selectedFont ?: defaultFont)        // your resource mechanism
+val bold: ByteArray = loadFont((selectedFont ?: defaultFont).bold)
+val pdf = document.render(regular, bold)
+```
+
+Any TrueType font works. For Latin diacritics (e.g. Czech/Slovak/Polish) pick a face that covers
+Latin Extended-A/B, such as Noto Sans or DejaVu Sans.
+
 ## Building & testing
 
 ```
@@ -50,6 +69,5 @@ Requires JDK 17+. Generated test PDFs/PNGs are written under `composepdf/build/`
 
 ## Roadmap
 
-- Bundled-font convenience (no need to pass font bytes explicitly).
 - iOS native build + cross-platform golden-image comparison.
 - Additional table / report layouts.

@@ -15,8 +15,8 @@ import kotlin.test.assertTrue
  *  3-column summary, paragraphs, a diacritic line, and a photo grid — flowing across pages. */
 class CapstoneReportTest {
 
-    private fun regular() = File("src/commonMain/resources/font/NotoSans-Regular.ttf").readBytes()
-    private fun bold() = File("src/commonMain/resources/font/NotoSans-Bold.ttf").readBytes()
+    private fun regular() = File("src/jvmTest/resources/font/NotoSans-Regular.ttf").readBytes()
+    private fun bold() = File("src/jvmTest/resources/font/NotoSans-Bold.ttf").readBytes()
 
     private val ink = Color(0xFF212529)
     private val muted = Color(0xFF6C757D)
