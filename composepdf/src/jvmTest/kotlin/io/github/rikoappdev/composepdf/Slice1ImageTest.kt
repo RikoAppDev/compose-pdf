@@ -47,7 +47,7 @@ class Slice1ImageTest {
             jpeg(640, 480, AwtColor(0xF3, 0x9C, 0x12), "5 4:3"),
         )
         val doc = pdfDocument(PageConfig(margin = 36.dp)) {
-            text("Fotodokumentácia — 18.06.2026", TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold))
+            text("Photo Documentation — 2026-06-18", TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold))
             spacer(8.dp)
             photoGrid(photos, perRow = 3, cellHeight = 90.dp, gap = 6.dp)
         }
