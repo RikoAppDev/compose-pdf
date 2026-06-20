@@ -16,8 +16,8 @@ internal class JpegImage(val width: Int, val height: Int, val components: Int, v
 
 /**
  * Turns laid-out [pages] (top-left-origin draw ops) + the [book]'s used fonts + [images] into a
- * PDF byte stream. Flips y to PDF's bottom-left origin. Streams are uncompressed in Slice 1
- * (FlateDecode is a later step).
+ * PDF byte stream. Flips y to PDF's bottom-left origin. Text/content streams, the subset font
+ * program and the ToUnicode CMap are FlateDecode-compressed; JPEG images stay as raw /DCTDecode.
  */
 internal fun serializePdf(pages: List<Page>, book: FontBook, images: List<JpegImage>): ByteArray {
     val doc = PdfDoc()
@@ -53,7 +53,7 @@ internal fun serializePdf(pages: List<Page>, book: FontBook, images: List<JpegIm
 
     val pageNums = ArrayList<Int>()
     for (page in pages) {
-        val content = doc.add(streamObject("", buildContent(page, fontRes, imgRes)))
+        val content = doc.add(streamObject("", buildContent(page, fontRes, imgRes), compress = true))
         pageNums.add(
             doc.addDict(
                 "<< /Type /Page /Parent $pagesObj 0 R /MediaBox [0 0 ${page.widthPt} ${page.heightPt}] " +

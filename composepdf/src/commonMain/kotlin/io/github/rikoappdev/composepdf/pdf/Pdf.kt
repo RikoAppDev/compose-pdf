@@ -1,5 +1,6 @@
 package io.github.rikoappdev.composepdf.pdf
 
+import io.github.rikoappdev.composepdf.compress.zlibCompress
 import io.github.rikoappdev.composepdf.util.ByteBuf
 
 /** PDF syntax is ASCII; map each char to one byte (no UTF-8 expansion). */
@@ -9,13 +10,22 @@ internal fun asciiBytes(s: String): ByteArray {
     return b
 }
 
-/** Builds a stream object body: `<< [dictBody] /Length N >> stream … endstream`. */
-internal fun streamObject(dictBody: String, data: ByteArray): ByteArray {
-    val b = ByteBuf(data.size + 64)
+/**
+ * Builds a stream object body: `<< [dictBody] [/Filter /FlateDecode] /Length N >> stream … endstream`.
+ *
+ * When [compress] is true the payload is zlib-deflated and a `/Filter /FlateDecode` entry is added;
+ * `/Length` then reflects the compressed size. Any caller-supplied `/Length1` (uncompressed font
+ * program size) stays in [dictBody] and is left untouched, as required for embedded font programs.
+ * Do not compress already-compressed payloads (e.g. JPEG `/DCTDecode` images).
+ */
+internal fun streamObject(dictBody: String, data: ByteArray, compress: Boolean = false): ByteArray {
+    val payload = if (compress) zlibCompress(data) else data
+    val b = ByteBuf(payload.size + 64)
     b.ascii("<< ")
     if (dictBody.isNotEmpty()) { b.ascii(dictBody); b.ascii(" ") }
-    b.ascii("/Length ${data.size} >>\nstream\n")
-    b.bytes(data)
+    if (compress) b.ascii("/Filter /FlateDecode ")
+    b.ascii("/Length ${payload.size} >>\nstream\n")
+    b.bytes(payload)
     b.ascii("\nendstream")
     return b.toByteArray()
 }
