@@ -1,14 +1,14 @@
 package io.github.rikoappdev.composepdf.text
 
 import io.github.rikoappdev.composepdf.FontWeight
-import io.github.rikoappdev.composepdf.font.FontBook
+import io.github.rikoappdev.composepdf.font.TextMetrics
 
 /** Greedy word-wrap. Honors explicit `\n` as hard breaks; a word wider than the column is
  *  placed alone (it may overflow — long-word breaking is a later refinement). Deterministic:
  *  decisions come only from integer font-unit measurements. */
 internal object LineBreaker {
 
-    fun wrap(text: String, weight: FontWeight, fontSizePt: Int, maxWidthPt: Int, book: FontBook): List<String> {
+    fun wrap(text: String, weight: FontWeight, fontSizePt: Int, maxWidthPt: Int, book: TextMetrics): List<String> {
         val out = ArrayList<String>()
         for (hardLine in text.split('\n')) {
             if (hardLine.isEmpty()) { out.add(""); continue }

@@ -7,7 +7,7 @@ import io.github.rikoappdev.composepdf.util.toCodePoints
  * Holds the Regular + Bold faces, shapes text to glyph ids, measures widths (integer font-unit
  * math), and tracks which glyphs each face actually uses so only those are embedded.
  */
-internal class FontBook(regularBytes: ByteArray, boldBytes: ByteArray) {
+internal class FontBook(regularBytes: ByteArray, boldBytes: ByteArray) : TextMetrics {
 
     val regular = TrueTypeFont(regularBytes)
     val bold = TrueTypeFont(boldBytes)
@@ -22,7 +22,7 @@ internal class FontBook(regularBytes: ByteArray, boldBytes: ByteArray) {
     private fun gidMapFor(w: FontWeight) = if (w == FontWeight.Bold) gidToCpBold else gidToCpRegular
 
     /** Shapes [text] to glyph ids, recording used glyphs + gid→code-point for ToUnicode. */
-    fun shape(text: String, w: FontWeight): IntArray {
+    override fun shape(text: String, w: FontWeight): IntArray {
         val font = fontFor(w); val used = usedFor(w); val map = gidMapFor(w)
         val cps = text.toCodePoints()
         return IntArray(cps.size) { i ->
@@ -33,7 +33,7 @@ internal class FontBook(regularBytes: ByteArray, boldBytes: ByteArray) {
     }
 
     /** Width of [text] in PDF points at [fontSizePt] (does not record usage). */
-    fun measureWidthPt(text: String, w: FontWeight, fontSizePt: Int): Int {
+    override fun measureWidthPt(text: String, w: FontWeight, fontSizePt: Int): Int {
         val font = fontFor(w); val upm = font.unitsPerEm
         var sum = 0L
         for (cp in text.toCodePoints()) sum += font.advanceWidth(font.gidForCodePoint(cp))
@@ -41,7 +41,7 @@ internal class FontBook(regularBytes: ByteArray, boldBytes: ByteArray) {
     }
 
     /** Width of already-shaped [gids] in PDF points at [fontSizePt]. */
-    fun widthOfPt(gids: IntArray, w: FontWeight, fontSizePt: Int): Int {
+    override fun widthOfPt(gids: IntArray, w: FontWeight, fontSizePt: Int): Int {
         val font = fontFor(w); val upm = font.unitsPerEm
         var sum = 0L
         for (g in gids) sum += font.advanceWidth(g)
@@ -49,7 +49,7 @@ internal class FontBook(regularBytes: ByteArray, boldBytes: ByteArray) {
     }
 
     /** Ascent (positive) in PDF points at [fontSizePt]. */
-    fun ascentPt(w: FontWeight, fontSizePt: Int): Int {
+    override fun ascentPt(w: FontWeight, fontSizePt: Int): Int {
         val font = fontFor(w)
         return ((font.ascender.toLong() * fontSizePt + font.unitsPerEm / 2) / font.unitsPerEm).toInt()
     }

@@ -1,7 +1,7 @@
 package io.github.rikoappdev.composepdf.layout
 
 import io.github.rikoappdev.composepdf.TextAlign
-import io.github.rikoappdev.composepdf.font.FontBook
+import io.github.rikoappdev.composepdf.font.TextMetrics
 import io.github.rikoappdev.composepdf.render.DrawOp
 import io.github.rikoappdev.composepdf.render.ImageOp
 import io.github.rikoappdev.composepdf.render.RectOp
@@ -20,7 +20,7 @@ internal class Placeable(
  * (Text/Column/Row/Box/Divider) take the available width; Image/Spacer are intrinsic. All integer
  * math → identical placement on every platform.
  */
-internal fun measure(node: Node, availWidthPt: Int, book: FontBook): Placeable = when (node) {
+internal fun measure(node: Node, availWidthPt: Int, book: TextMetrics): Placeable = when (node) {
     is SpacerNode -> Placeable(node.widthPt, node.heightPt) { _, _, _ -> }
 
     is DividerNode -> Placeable(availWidthPt, node.thicknessPt) { x, y, out ->

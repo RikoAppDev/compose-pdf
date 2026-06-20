@@ -1,6 +1,7 @@
 package io.github.rikoappdev.composepdf
 
 import io.github.rikoappdev.composepdf.font.FontBook
+import io.github.rikoappdev.composepdf.font.TextMetrics
 import io.github.rikoappdev.composepdf.image.parseJpeg
 import io.github.rikoappdev.composepdf.layout.BoxNode
 import io.github.rikoappdev.composepdf.layout.ColumnNode
@@ -188,7 +189,7 @@ class PdfDocumentSpec internal constructor(
 
 private const val BAND_GAP_PT = 12
 
-private fun layout(spec: PdfDocumentSpec, book: FontBook): List<Page> {
+internal fun layout(spec: PdfDocumentSpec, book: TextMetrics): List<Page> {
     val cfg = spec.config
     val w = cfg.size.widthPt
     val h = cfg.size.heightPt
@@ -272,7 +273,7 @@ private fun layout(spec: PdfDocumentSpec, book: FontBook): List<Page> {
     return pages
 }
 
-private fun addPageNumbers(pages: List<Page>, book: FontBook, cfg: PageConfig) {
+private fun addPageNumbers(pages: List<Page>, book: TextMetrics, cfg: PageConfig) {
     val style = cfg.pageNumberStyle
     val fs = style.fontSize.value
     val weight = style.fontWeight

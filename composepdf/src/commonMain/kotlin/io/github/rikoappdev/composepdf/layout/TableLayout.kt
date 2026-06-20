@@ -3,7 +3,7 @@ package io.github.rikoappdev.composepdf.layout
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.TextAlign
 import io.github.rikoappdev.composepdf.TextStyle
-import io.github.rikoappdev.composepdf.font.FontBook
+import io.github.rikoappdev.composepdf.font.TextMetrics
 import io.github.rikoappdev.composepdf.render.DrawOp
 import io.github.rikoappdev.composepdf.render.RectOp
 import io.github.rikoappdev.composepdf.render.TextOp
@@ -34,7 +34,7 @@ internal fun tableColumnWidths(columns: List<TableColumn>, contentWidthPt: Int):
     return widths
 }
 
-internal fun tableRowHeight(cells: List<String>, style: TextStyle, colWidths: IntArray, padHPt: Int, padVPt: Int, book: FontBook): Int {
+internal fun tableRowHeight(cells: List<String>, style: TextStyle, colWidths: IntArray, padHPt: Int, padVPt: Int, book: TextMetrics): Int {
     val fs = style.fontSize.value
     val lineH = (fs * style.lineHeightMultiple).toInt()
     var maxLines = 1
@@ -60,7 +60,7 @@ internal fun drawTableRow(
     padVPt: Int,
     background: PdfColor?,
     gridColor: PdfColor,
-    book: FontBook,
+    book: TextMetrics,
     out: MutableList<DrawOp>,
 ) {
     val totalW = colWidths.sum()
