@@ -42,4 +42,13 @@ class TextStyle(
     val align: TextAlign = TextAlign.Start,
     /** Line height as a multiple of font size (1.2 ≈ comfortable). */
     val lineHeightMultiple: Double = 1.3,
-)
+) {
+    /** Returns a copy with the given fields overridden (mirrors a data class `copy`). */
+    fun copy(
+        fontSize: Sp = this.fontSize,
+        fontWeight: FontWeight = this.fontWeight,
+        color: PdfColor = this.color,
+        align: TextAlign = this.align,
+        lineHeightMultiple: Double = this.lineHeightMultiple,
+    ): TextStyle = TextStyle(fontSize, fontWeight, color, align, lineHeightMultiple)
+}

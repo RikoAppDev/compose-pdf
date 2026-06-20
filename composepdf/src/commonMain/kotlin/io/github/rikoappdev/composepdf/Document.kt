@@ -56,6 +56,20 @@ open class ContainerScope internal constructor(internal val images: MutableList<
         nodes.add(RowScope(images).apply(build).toNode(gap.value))
     }
 
+    /** A label/value line: [label] on the left, [value] right-aligned. Common in detail reports. */
+    fun keyValue(
+        label: String,
+        value: String,
+        labelStyle: TextStyle = TextStyle(fontSize = 9.sp, color = Color(0xFF6C757D)),
+        valueStyle: TextStyle = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+        gap: Dp = 8.dp,
+    ) {
+        row(gap) {
+            cell(1f) { text(label, labelStyle) }
+            cell(1f) { text(value, valueStyle.copy(align = TextAlign.End)) }
+        }
+    }
+
     fun box(
         padding: Dp = 0.dp,
         border: Dp = 0.dp,
@@ -103,12 +117,13 @@ open class ContainerScope internal constructor(internal val images: MutableList<
         totalStyle: TextStyle = TextStyle(fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF212529)),
         headerBackground: PdfColor? = null,
         totalBackground: PdfColor? = Color(0xFFF1F3F5),
+        zebra: PdfColor? = null,
         gridColor: PdfColor = Color(0xFFDDDDDD),
         cellPadding: Dp = 4.dp,
         repeatHeader: Boolean = true,
         build: TableScope.() -> Unit,
     ) {
-        val scope = TableScope(cellStyle, totalStyle, totalBackground).apply(build)
+        val scope = TableScope(cellStyle, totalStyle, totalBackground, zebra).apply(build)
         nodes.add(
             TableNode(
                 columns = columns.map { TableColumn(it.weight, it.header, it.align) },
@@ -130,10 +145,17 @@ class TableScope internal constructor(
     private val cellStyle: TextStyle,
     private val totalStyle: TextStyle,
     private val totalBackground: PdfColor?,
+    private val zebra: PdfColor? = null,
 ) {
     internal val rows = ArrayList<TableRow>()
-    fun row(vararg cells: String) { rows.add(TableRow(cells.toList(), cellStyle, null)) }
-    fun row(cells: List<String>) { rows.add(TableRow(cells, cellStyle, null)) }
+    private var bodyIndex = 0
+
+    /** Background for the next body row: [zebra] on every other row (when set), else none. */
+    private fun nextBodyBackground(): PdfColor? =
+        (if (zebra != null && bodyIndex % 2 == 1) zebra else null).also { bodyIndex++ }
+
+    fun row(vararg cells: String) { rows.add(TableRow(cells.toList(), cellStyle, nextBodyBackground())) }
+    fun row(cells: List<String>) { rows.add(TableRow(cells, cellStyle, nextBodyBackground())) }
     fun totalRow(vararg cells: String) { rows.add(TableRow(cells.toList(), totalStyle, totalBackground)) }
 }
 
