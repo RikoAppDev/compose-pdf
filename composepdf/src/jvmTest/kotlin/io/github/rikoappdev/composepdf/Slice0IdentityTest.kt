@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
  */
 class Slice0IdentityTest {
 
-    private val fontPath = "src/commonMain/resources/font/NotoSans-Regular.ttf"
+    private val fontPath = "src/jvmTest/resources/font/NotoSans-Regular.ttf"
     // Neutral typographic pangrams that exercise Latin-Extended diacritics (no real names/domain).
     private val text = "Příliš žluťoučký kůň úpěl ďábelské ódy zażółć gęślą jaźń"
 

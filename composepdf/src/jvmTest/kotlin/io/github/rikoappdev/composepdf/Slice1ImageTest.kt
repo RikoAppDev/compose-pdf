@@ -15,8 +15,8 @@ import kotlin.test.assertTrue
 /** Slice 1: JPEG embedding (/DCTDecode pass-through) + photo grid with cover-crop. */
 class Slice1ImageTest {
 
-    private fun regular() = File("src/commonMain/resources/font/NotoSans-Regular.ttf").readBytes()
-    private fun bold() = File("src/commonMain/resources/font/NotoSans-Bold.ttf").readBytes()
+    private fun regular() = File("src/jvmTest/resources/font/NotoSans-Regular.ttf").readBytes()
+    private fun bold() = File("src/jvmTest/resources/font/NotoSans-Bold.ttf").readBytes()
 
     private fun jpeg(w: Int, h: Int, color: AwtColor, label: String): ByteArray {
         val img = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)

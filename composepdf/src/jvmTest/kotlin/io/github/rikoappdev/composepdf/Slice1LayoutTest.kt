@@ -11,8 +11,8 @@ import kotlin.test.assertTrue
 /** Container layout — weighted rows/columns, boxes with border + background. */
 class Slice1LayoutTest {
 
-    private fun regular() = File("src/commonMain/resources/font/NotoSans-Regular.ttf").readBytes()
-    private fun bold() = File("src/commonMain/resources/font/NotoSans-Bold.ttf").readBytes()
+    private fun regular() = File("src/jvmTest/resources/font/NotoSans-Regular.ttf").readBytes()
+    private fun bold() = File("src/jvmTest/resources/font/NotoSans-Bold.ttf").readBytes()
 
     private val ink = Color(0xFF212529)
     private val muted = Color(0xFF6C757D)
