@@ -22,6 +22,7 @@ import io.github.rikoappdev.composepdf.layout.tableRowHeight
 import io.github.rikoappdev.composepdf.pdf.JpegImage
 import io.github.rikoappdev.composepdf.pdf.serializePdf
 import io.github.rikoappdev.composepdf.render.Page
+import io.github.rikoappdev.composepdf.render.RectOp
 import io.github.rikoappdev.composepdf.render.TextOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
 
@@ -35,6 +36,14 @@ class PageConfig(
     val margin: Dp = 36.dp,
     val pageNumbers: Boolean = true,
     val pageNumberStyle: TextStyle = TextStyle(fontSize = 8.sp, color = Color(0xFF7F807F), align = TextAlign.Center),
+    /**
+     * When true (default), a paragraph that fits within a single page is moved **whole** to the next
+     * page instead of being split, when it doesn't fit the remaining space — so a block never leaves
+     * an awkward sliver at the bottom of a page. Paragraphs taller than a full page still split and
+     * flow across pages. Atomic blocks (boxes, rows, images, tables) already move whole when they
+     * don't fit.
+     */
+    val keepBlocksTogether: Boolean = true,
 )
 
 /** Compose-style container: stacks children vertically. Shared by the document root, columns,
@@ -211,6 +220,81 @@ class PdfDocumentSpec internal constructor(
 
 private const val BAND_GAP_PT = 12
 
+/** Don't open a box with less than this much vertical room left — avoids an empty box sliver. */
+private const val MIN_BOX_OPEN_ROOM_PT = 28
+
+/** A box currently being flowed; tracks the top of its fragment on the current page. */
+private class BoxFrame(
+    val x: Int,
+    val width: Int,
+    val padPt: Int,
+    val borderPt: Int,
+    val borderColor: PdfColor,
+    val background: PdfColor?,
+    val depth: Int,
+    var fragTop: Int,
+)
+
+/**
+ * Single-pass page flow. Text and tables flow line/row-by-row; boxes and columns split across pages
+ * (their border/background is redrawn per page fragment); rows and images are atomic (never split).
+ * All integer math → identical placement on every platform.
+ */
+private class Flow(
+    val w: Int,
+    val h: Int,
+    val topY: Int,
+    val usableBottom: Int,
+    val book: TextMetrics,
+) {
+    val pages = ArrayList<Page>()
+    var page = Page(w, h).also { pages.add(it) }
+    var y = topY
+    private val openBoxes = ArrayList<BoxFrame>()
+    private val backgrounds = ArrayList<Triple<Int, Int, RectOp>>() // (pageIndex, depth, rect)
+
+    val depth get() = openBoxes.size
+    fun roomLeft() = usableBottom - y
+
+    fun newPage() {
+        for (b in openBoxes) emitFragment(b, b.fragTop, usableBottom)
+        page = Page(w, h).also { pages.add(it) }
+        y = topY
+        for (b in openBoxes) { b.fragTop = y; y += b.padPt }
+    }
+
+    fun openBox(b: BoxFrame) {
+        b.fragTop = y
+        openBoxes.add(b)
+        y += b.padPt
+    }
+
+    fun closeBox(b: BoxFrame) {
+        y += b.padPt
+        emitFragment(b, b.fragTop, y)
+        openBoxes.removeAt(openBoxes.lastIndex)
+    }
+
+    private fun emitFragment(b: BoxFrame, top: Int, bottom: Int) {
+        val height = bottom - top
+        if (height <= 0) return
+        if (b.background != null) {
+            backgrounds.add(Triple(pages.size - 1, b.depth, RectOp(b.x, top, b.width, height, fill = b.background, stroke = null, strokeWidthPt = 0)))
+        }
+        if (b.borderPt > 0) {
+            page.ops.add(RectOp(b.x, top, b.width, height, fill = null, stroke = b.borderColor, strokeWidthPt = b.borderPt))
+        }
+    }
+
+    fun finish(): List<Page> {
+        // Backgrounds go behind content; outer boxes (lower depth) behind inner ones.
+        for ((pi, list) in backgrounds.groupBy { it.first }) {
+            pages[pi].ops.addAll(0, list.sortedBy { it.second }.map { it.third })
+        }
+        return pages
+    }
+}
+
 internal fun layout(spec: PdfDocumentSpec, book: TextMetrics): List<Page> {
     val cfg = spec.config
     val w = cfg.size.widthPt
@@ -224,67 +308,9 @@ internal fun layout(spec: PdfDocumentSpec, book: TextMetrics): List<Page> {
     val topY = m + (headerP?.let { it.heightPt + BAND_GAP_PT } ?: 0)
     val usableBottom = h - m - (footerP?.let { it.heightPt + BAND_GAP_PT } ?: 0)
 
-    val pages = ArrayList<Page>()
-    var page = Page(w, h).also { pages.add(it) }
-    var y = topY
-    fun newPage() { page = Page(w, h).also { pages.add(it) }; y = topY }
-
-    for (node in spec.nodes) when (node) {
-        is SpacerNode -> {
-            y += node.heightPt
-            if (y > usableBottom) newPage()
-        }
-        is TextNode -> {
-            // Top-level paragraphs split line-by-line across pages.
-            val weight = node.style.fontWeight
-            val fs = node.style.fontSize.value
-            val lineH = (fs * node.style.lineHeightMultiple).toInt()
-            val ascent = book.ascentPt(weight, fs)
-            for (line in LineBreaker.wrap(node.text, weight, fs, contentW, book)) {
-                if (y + lineH > usableBottom && y > topY) newPage()
-                if (line.isNotEmpty()) {
-                    val gids = book.shape(line, weight)
-                    val lw = book.widthOfPt(gids, weight, fs)
-                    val x = when (node.style.align) {
-                        TextAlign.Start -> m
-                        TextAlign.Center -> m + (contentW - lw) / 2
-                        TextAlign.End -> m + (contentW - lw)
-                    }
-                    page.ops.add(TextOp(x, y + ascent, gids, weight, fs, node.style.color))
-                }
-                y += lineH
-            }
-        }
-        is TableNode -> {
-            // Top-level tables split across pages by row, repeating the header.
-            val colWidths = tableColumnWidths(node.columns, contentW)
-            val headerCells = node.columns.map { it.header }
-            val aligns = node.columns.map { it.align }
-            val headerH = tableRowHeight(headerCells, node.headerStyle, colWidths, node.cellPadHPt, node.cellPadVPt, book)
-            fun placeHeader() {
-                if (y + headerH > usableBottom && y > topY) newPage()
-                drawTableRow(headerCells, node.headerStyle, aligns, m, y, headerH, colWidths, node.cellPadHPt, node.cellPadVPt, node.headerBackground, node.gridColor, book, page.ops)
-                y += headerH
-            }
-            placeHeader()
-            for (row in node.rows) {
-                val rh = tableRowHeight(row.cells, row.style, colWidths, node.cellPadHPt, node.cellPadVPt, book)
-                if (y + rh > usableBottom && y > topY) {
-                    newPage()
-                    if (node.repeatHeader) placeHeader()
-                }
-                drawTableRow(row.cells, row.style, aligns, m, y, rh, colWidths, node.cellPadHPt, node.cellPadVPt, row.background, node.gridColor, book, page.ops)
-                y += rh
-            }
-        }
-        else -> {
-            // Containers/dividers/images place atomically; move to next page if they don't fit.
-            val p = measure(node, contentW, book)
-            if (y + p.heightPt > usableBottom && y > topY) newPage()
-            p.place(m, y, page.ops)
-            y += p.heightPt
-        }
-    }
+    val ctx = Flow(w, h, topY, usableBottom, book)
+    for (node in spec.nodes) flowNode(node, m, contentW, ctx, cfg)
+    val pages = ctx.finish()
 
     // Repeat the header/footer bands on every page (placers are reusable across pages).
     for (p in pages) {
@@ -293,6 +319,98 @@ internal fun layout(spec: PdfDocumentSpec, book: TextMetrics): List<Page> {
     }
     if (cfg.pageNumbers) addPageNumbers(pages, book, cfg)
     return pages
+}
+
+/** Flows a list of sibling nodes with [gapPt] between them. */
+private fun flowNodes(nodes: List<Node>, x: Int, availW: Int, gapPt: Int, ctx: Flow, cfg: PageConfig) {
+    for ((i, child) in nodes.withIndex()) {
+        flowNode(child, x, availW, ctx, cfg)
+        if (gapPt > 0 && i < nodes.size - 1) {
+            ctx.y += gapPt
+            if (ctx.y > ctx.usableBottom) ctx.newPage()
+        }
+    }
+}
+
+private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig) {
+    when (node) {
+        is SpacerNode -> {
+            ctx.y += node.heightPt
+            if (ctx.y > ctx.usableBottom) ctx.newPage()
+        }
+        is DividerNode -> {
+            if (ctx.y + node.thicknessPt > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
+            ctx.page.ops.add(RectOp(x, ctx.y, availW, node.thicknessPt, fill = node.color, stroke = null, strokeWidthPt = 0))
+            ctx.y += node.thicknessPt
+        }
+        is TextNode -> flowText(node, x, availW, ctx, cfg)
+        is ColumnNode -> flowNodes(node.children, x, availW, node.gapPt, ctx, cfg)
+        is BoxNode -> {
+            val pad = node.paddingPt
+            if (ctx.y > ctx.topY && ctx.roomLeft() < MIN_BOX_OPEN_ROOM_PT) ctx.newPage()
+            val frame = BoxFrame(x, availW, pad, node.borderPt, node.borderColor, node.background, ctx.depth, ctx.y)
+            ctx.openBox(frame)
+            flowNode(node.child, x + pad, (availW - 2 * pad).coerceAtLeast(0), ctx, cfg)
+            ctx.closeBox(frame)
+        }
+        is TableNode -> flowTable(node, x, availW, ctx, cfg)
+        is RowNode, is ImageNode -> {
+            // Atomic — never split; move whole to the next page if it doesn't fit.
+            val p = measure(node, availW, ctx.book)
+            if (ctx.y + p.heightPt > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
+            p.place(x, ctx.y, ctx.page.ops)
+            ctx.y += p.heightPt
+        }
+    }
+}
+
+private fun flowText(node: TextNode, x: Int, availW: Int, ctx: Flow, cfg: PageConfig) {
+    val weight = node.style.fontWeight
+    val fs = node.style.fontSize.value
+    val lineH = (fs * node.style.lineHeightMultiple).toInt()
+    val ascent = ctx.book.ascentPt(weight, fs)
+    val lines = LineBreaker.wrap(node.text, weight, fs, availW, ctx.book)
+    // Keep-together: a paragraph that fits on a page is moved whole rather than leaving a sliver.
+    val totalH = lines.size * lineH
+    if (cfg.keepBlocksTogether && ctx.y > ctx.topY && ctx.y + totalH > ctx.usableBottom && totalH <= ctx.usableBottom - ctx.topY) {
+        ctx.newPage()
+    }
+    for (line in lines) {
+        if (ctx.y + lineH > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
+        if (line.isNotEmpty()) {
+            val gids = ctx.book.shape(line, weight)
+            val lw = ctx.book.widthOfPt(gids, weight, fs)
+            val lx = when (node.style.align) {
+                TextAlign.Start -> x
+                TextAlign.Center -> x + (availW - lw) / 2
+                TextAlign.End -> x + (availW - lw)
+            }
+            ctx.page.ops.add(TextOp(lx, ctx.y + ascent, gids, weight, fs, node.style.color))
+        }
+        ctx.y += lineH
+    }
+}
+
+private fun flowTable(node: TableNode, x: Int, availW: Int, ctx: Flow, cfg: PageConfig) {
+    val colWidths = tableColumnWidths(node.columns, availW)
+    val headerCells = node.columns.map { it.header }
+    val aligns = node.columns.map { it.align }
+    val headerH = tableRowHeight(headerCells, node.headerStyle, colWidths, node.cellPadHPt, node.cellPadVPt, ctx.book)
+    fun placeHeader() {
+        if (ctx.y + headerH > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
+        drawTableRow(headerCells, node.headerStyle, aligns, x, ctx.y, headerH, colWidths, node.cellPadHPt, node.cellPadVPt, node.headerBackground, node.gridColor, ctx.book, ctx.page.ops)
+        ctx.y += headerH
+    }
+    placeHeader()
+    for (row in node.rows) {
+        val rh = tableRowHeight(row.cells, row.style, colWidths, node.cellPadHPt, node.cellPadVPt, ctx.book)
+        if (ctx.y + rh > ctx.usableBottom && ctx.y > ctx.topY) {
+            ctx.newPage()
+            if (node.repeatHeader) placeHeader()
+        }
+        drawTableRow(row.cells, row.style, aligns, x, ctx.y, rh, colWidths, node.cellPadHPt, node.cellPadVPt, row.background, node.gridColor, ctx.book, ctx.page.ops)
+        ctx.y += rh
+    }
 }
 
 private fun addPageNumbers(pages: List<Page>, book: TextMetrics, cfg: PageConfig) {
