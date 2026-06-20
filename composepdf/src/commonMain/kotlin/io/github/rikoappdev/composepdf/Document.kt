@@ -105,24 +105,25 @@ open class ContainerScope internal constructor(internal val images: MutableList<
         )
     }
 
-    /** Embeds a JPEG. [width] = 0.dp fills the available width. [cover] crops to fill, else fits. */
-    fun image(jpegBytes: ByteArray, width: Dp = 0.dp, height: Dp, cover: Boolean = true) {
+    /** Embeds a JPEG. [width] = 0.dp fills the available width. [fit] controls cover/contain/smart. */
+    fun image(jpegBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover) {
         val info = parseJpeg(jpegBytes)
         val index = images.size
         images.add(JpegImage(info.width, info.height, info.components, jpegBytes))
-        nodes.add(ImageNode(index, width.value, height.value, info.width, info.height, cover))
+        nodes.add(ImageNode(index, width.value, height.value, info.width, info.height, fit))
     }
 
     /**
      * Lays out [photos] (JPEG bytes) in a grid of [perRow] equal cells, each [cellHeight] tall.
-     * [cover] = true crops each photo to fill its cell; false fits the whole photo inside the cell
-     * preserving its original aspect ratio (letterboxed, nothing cropped).
+     * [fit] = [PhotoFit.Cover] crops each photo to fill its cell; [PhotoFit.Contain] fits the whole
+     * photo preserving aspect; [PhotoFit.Smart] preserves aspect but crops extreme-aspect photos so
+     * they don't become thin slivers.
      */
-    fun photoGrid(photos: List<ByteArray>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, cover: Boolean = true) {
+    fun photoGrid(photos: List<ByteArray>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, fit: PhotoFit = PhotoFit.Cover) {
         photos.chunked(perRow).forEachIndexed { rowIndex, chunk ->
             if (rowIndex > 0) spacer(gap)
             row(gap) {
-                chunk.forEach { bytes -> cell(1f) { image(bytes, width = 0.dp, height = cellHeight, cover = cover) } }
+                chunk.forEach { bytes -> cell(1f) { image(bytes, width = 0.dp, height = cellHeight, fit = fit) } }
                 repeat(perRow - chunk.size) { cell(1f) {} } // pad to keep cells aligned
             }
         }
@@ -375,6 +376,12 @@ private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig
         is ColumnNode -> flowNodes(node.children, x, availW, node.gapPt, ctx, cfg)
         is BoxNode -> {
             val pad = node.paddingPt
+            // Keep-together: a box that fits on a page is moved whole rather than split with its
+            // header orphaned at the page bottom. A box taller than a page still splits and flows.
+            if (cfg.keepBlocksTogether && ctx.y > ctx.topY) {
+                val boxH = measure(node, availW, ctx.book).heightPt
+                if (boxH <= ctx.usableBottom - ctx.topY && ctx.y + boxH > ctx.usableBottom) ctx.newPage()
+            }
             if (ctx.y > ctx.topY && ctx.roomLeft() < MIN_BOX_OPEN_ROOM_PT) ctx.newPage()
             val frame = BoxFrame(x, availW, pad, node.borderPt, node.borderColor, node.background, ctx.depth, ctx.y)
             ctx.openBox(frame)

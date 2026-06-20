@@ -2,6 +2,7 @@ package io.github.rikoappdev.composepdf.render
 
 import io.github.rikoappdev.composepdf.FontWeight
 import io.github.rikoappdev.composepdf.PdfColor
+import io.github.rikoappdev.composepdf.PhotoFit
 
 /**
  * Low-level positioned draw operations produced by the layout engine and consumed by the
@@ -34,8 +35,8 @@ internal class RectOp(
 
 /**
  * Draws image [imageIndex] into the box with top-left at (x, y). [intrinsicW]/[intrinsicH] are the
- * JPEG's pixel dimensions; [cover] = true scales to fill the box (cropping the overflow via a clip),
- * false fits inside preserving aspect (contain).
+ * JPEG's pixel dimensions; [fit] decides cover-crop, contain-fit, or smart (contain unless an
+ * extreme aspect would shrink it to a sliver).
  */
 internal class ImageOp(
     val xPt: Int,
@@ -45,7 +46,7 @@ internal class ImageOp(
     val imageIndex: Int,
     val intrinsicW: Int,
     val intrinsicH: Int,
-    val cover: Boolean,
+    val fit: PhotoFit,
 ) : DrawOp
 
 internal class Page(val widthPt: Int, val heightPt: Int) {

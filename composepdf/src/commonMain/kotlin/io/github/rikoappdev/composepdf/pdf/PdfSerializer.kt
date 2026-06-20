@@ -2,6 +2,7 @@ package io.github.rikoappdev.composepdf.pdf
 
 import io.github.rikoappdev.composepdf.FontWeight
 import io.github.rikoappdev.composepdf.PdfColor
+import io.github.rikoappdev.composepdf.PhotoFit
 import io.github.rikoappdev.composepdf.font.FontBook
 import io.github.rikoappdev.composepdf.render.ImageOp
 import io.github.rikoappdev.composepdf.render.Page
@@ -93,13 +94,21 @@ private fun buildContent(
             val boxYPdf = h - (op.yPt + op.hPt)
             val iw = if (op.intrinsicW > 0) op.intrinsicW else op.wPt
             val ih = if (op.intrinsicH > 0) op.intrinsicH else op.hPt
-            val s = if (op.cover) maxOf(op.wPt.toDouble() / iw, op.hPt.toDouble() / ih)
-            else minOf(op.wPt.toDouble() / iw, op.hPt.toDouble() / ih)
+            val coverS = maxOf(op.wPt.toDouble() / iw, op.hPt.toDouble() / ih)
+            val containS = minOf(op.wPt.toDouble() / iw, op.hPt.toDouble() / ih)
+            val useCover = when (op.fit) {
+                PhotoFit.Cover -> true
+                PhotoFit.Contain -> false
+                // Smart: contain, unless the contained image would fill < 25% of a cell axis (an
+                // extreme aspect ratio) — then crop-to-fill so it isn't a thin sliver.
+                PhotoFit.Smart -> minOf(iw * containS / op.wPt, ih * containS / op.hPt) < 0.25
+            }
+            val s = if (useCover) coverS else containS
             val dw = (iw * s).roundToInt()
             val dh = (ih * s).roundToInt()
             val ox = op.xPt + (op.wPt - dw) / 2
             val oy = boxYPdf + (op.hPt - dh) / 2
-            if (op.cover) {
+            if (useCover) {
                 b.ascii("q\n${op.xPt} $boxYPdf ${op.wPt} ${op.hPt} re W n\n$dw 0 0 $dh $ox $oy cm\n/$name Do\nQ\n")
             } else {
                 b.ascii("q\n$dw 0 0 $dh $ox $oy cm\n/$name Do\nQ\n")

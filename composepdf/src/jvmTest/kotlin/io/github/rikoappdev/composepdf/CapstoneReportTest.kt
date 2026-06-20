@@ -44,7 +44,7 @@ class CapstoneReportTest {
         val doc = pdfDocument(PageConfig(margin = 36.dp)) {
             header {
                 row(gap = 12.dp) {
-                    cell(2f) { image(logo, width = 90.dp, height = 30.dp, cover = false) }
+                    cell(2f) { image(logo, width = 90.dp, height = 30.dp, fit = PhotoFit.Contain) }
                     cell(3f) {
                         text("ACME Inc.", TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ink))
                         text("123 Example Street, 00000 City", TextStyle(fontSize = 8.sp, color = ink))

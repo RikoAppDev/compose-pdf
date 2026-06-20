@@ -35,6 +35,13 @@ enum class FontWeight { Normal, Bold }
 
 enum class TextAlign { Start, Center, End }
 
+/**
+ * How an image fills its box. [Cover] crops to fill; [Contain] fits the whole image preserving its
+ * aspect ratio; [Smart] preserves aspect like [Contain] but crops-to-fill when an extreme aspect
+ * ratio would otherwise shrink the image to a thin sliver (so a photo grid never shows tiny strips).
+ */
+enum class PhotoFit { Cover, Contain, Smart }
+
 class TextStyle(
     val fontSize: Sp = 12.sp,
     val fontWeight: FontWeight = FontWeight.Normal,
