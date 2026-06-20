@@ -95,10 +95,10 @@ internal fun measure(node: Node, availWidthPt: Int, book: TextMetrics): Placeabl
         val boxH = childP.heightPt + 2 * pad
         Placeable(availWidthPt, boxH) { x, y, out ->
             if (node.background != null) {
-                out.add(RectOp(x, y, availWidthPt, boxH, fill = node.background, stroke = null, strokeWidthPt = 0))
+                out.add(RectOp(x, y, availWidthPt, boxH, fill = node.background, stroke = null, strokeWidthPt = 0, cornerRadiusPt = node.cornerRadiusPt))
             }
             if (node.borderPt > 0) {
-                out.add(RectOp(x, y, availWidthPt, boxH, fill = null, stroke = node.borderColor, strokeWidthPt = node.borderPt))
+                out.add(RectOp(x, y, availWidthPt, boxH, fill = null, stroke = node.borderColor, strokeWidthPt = node.borderPt, cornerRadiusPt = node.cornerRadiusPt))
             }
             childP.place(x + pad, y + pad, out)
         }

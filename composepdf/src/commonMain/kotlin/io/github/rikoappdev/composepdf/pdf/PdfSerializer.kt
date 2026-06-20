@@ -77,10 +77,9 @@ private fun buildContent(
     for (op in page.ops) when (op) {
         is RectOp -> {
             val yPdf = h - (op.yPt + op.hPt)
-            op.fill?.let { b.ascii("${fill(it)}${op.xPt} $yPdf ${op.wPt} ${op.hPt} re f\n") }
-            op.stroke?.let {
-                b.ascii("${stroke(it)}${op.strokeWidthPt} w\n${op.xPt} $yPdf ${op.wPt} ${op.hPt} re S\n")
-            }
+            val path = rectPath(op.xPt, yPdf, op.wPt, op.hPt, op.cornerRadiusPt)
+            op.fill?.let { b.ascii("${fill(it)}$path f\n") }
+            op.stroke?.let { b.ascii("${stroke(it)}${op.strokeWidthPt} w\n$path S\n") }
         }
         is TextOp -> {
             val resName = fontRes.getValue(op.weight).first
@@ -116,6 +115,19 @@ private fun buildContent(
         }
     }
     return b.toByteArray()
+}
+
+/** A rectangle path in PDF user space; rounds the corners when [r] > 0 (Bézier quarter-circles). */
+private fun rectPath(x: Int, y: Int, w: Int, h: Int, r: Int): String {
+    if (r <= 0) return "$x $y $w $h re"
+    val rr = minOf(r, w / 2, h / 2)
+    val ck = (rr * 0.5523).roundToInt()
+    val xr = x + rr; val xw = x + w; val xwr = x + w - rr
+    val yr = y + rr; val yh = y + h; val yhr = y + h - rr
+    return "$xr $y m $xwr $y l ${xwr + ck} $y $xw ${yr - ck} $xw $yr c " +
+        "$xw $yhr l $xw ${yhr + ck} ${xwr + ck} $yh $xwr $yh c " +
+        "$xr $yh l ${xr - ck} $yh $x ${yhr + ck} $x $yhr c " +
+        "$x $yr l $x ${yr - ck} ${xr - ck} $y $xr $y c h"
 }
 
 /** PDF color component as a deterministic "0.ddd"/"1" decimal string (value/255). */

@@ -27,4 +27,5 @@ internal class BoxNode(
     val borderPt: Int,
     val borderColor: PdfColor,
     val background: PdfColor?,
+    val cornerRadiusPt: Int = 0,
 ) : Node
