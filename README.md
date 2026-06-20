@@ -5,7 +5,9 @@ A **pure-Kotlin Kotlin Multiplatform** library that generates **vector** PDFs wh
 **pagination**, authored with a **Compose-style DSL**. Output does not depend on the device
 font-scale or the host UI lifecycle.
 
-Coordinates: `io.github.rikoappdev:compose-pdf` · Targets: **Android + iOS + JVM** · License: Apache-2.0 (code), bundled font OFL-1.1.
+Coordinates: `io.github.rikoappdev:compose-pdf` · Targets: **Android + iOS + JVM** · License: **Apache-2.0**.
+
+The published artifact bundles **no font** — you pass your own (see [Fonts](#fonts)).
 
 ## Why a custom engine
 
@@ -22,8 +24,8 @@ to users.
 ## Features
 
 - Embedded **subset Type0/CIDFontType2 (Identity-H) + ToUnicode** → selectable & searchable text, including Latin diacritics (composite glyphs subset correctly).
-- **Compose-style DSL**: `text`, `spacer`, `divider`, `row { cell(weight) { } }`, `column`, `box(padding, border, background)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through, cover-crop), `table` (weighted columns, repeating header, total rows), repeating `header`/`footer` bands + page numbers.
-- Familiar value types: `TextStyle`, `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight`, `TextAlign`.
+- **Compose-style DSL**: `text`, `spacer`, `divider`, `row { cell(weight) { } }`, `column`, `box(padding, border, background)`, `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through, cover-crop), `table` (weighted columns, repeating header, total rows, optional `zebra` striping), repeating `header`/`footer` bands + page numbers.
+- Familiar value types: `TextStyle` (with `copy`), `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight`, `TextAlign`.
 - **Automatic pagination**: paragraphs split by line; tables split by row repeating the header; containers flow across pages.
 - **FlateDecode compression**: content streams, the subset font program and the ToUnicode CMap are deflated by a pure-Kotlin encoder (deterministic on every platform).
 - Regular + Bold faces (bundled).
@@ -72,4 +74,7 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 
 ## Roadmap
 
-- Additional table / report layouts.
+- GPOS kerning / ligatures (v1 uses advance-width shaping).
+- More image formats (currently JPEG `/DCTDecode` only).
+- Complex scripts / RTL / bidi.
+- Long-word breaking inside narrow columns.
