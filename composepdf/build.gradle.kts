@@ -89,13 +89,12 @@ publishing {
         }
     }
     repositories {
+        // Stage all signed artifacts into a local Maven layout; the CI workflow zips this and uploads
+        // it to the Central Portal Publisher API (the native path — the legacy OSSRH staging API +
+        // finalize step published to the Portal but did not reliably sync to the Maven Central CDN).
         maven {
             name = "MavenCentral"
-            url = uri("https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/")
-            credentials {
-                username = findProperty("ossrhUsername") as String? ?: System.getenv("OSSRH_USERNAME") ?: ""
-                password = findProperty("ossrhPassword") as String? ?: System.getenv("OSSRH_PASSWORD") ?: ""
-            }
+            url = layout.buildDirectory.dir("staging-deploy").get().asFile.toURI()
         }
     }
 }
