@@ -42,9 +42,21 @@ jobs:
           AUTH=$(printf '%s:%s' "$OSSRH_USERNAME" "$OSSRH_PASSWORD" | base64 | tr -d '\n')
           URL="https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/io.github.rikoappdev?publishing_type=automatic"
           echo "POST $URL"
-          CODE=$(curl -sS -o /tmp/finalize.txt -w '%{http_code}' -X POST -H "Authorization: Bearer $AUTH" "$URL")
-          echo "HTTP $CODE"; cat /tmp/finalize.txt; echo
-          test "$CODE" -ge 200 -a "$CODE" -lt 300
+          # The OPEN staging repository can take a short while to register after the upload, so the
+          # finalize call may briefly get "No repository found" (HTTP 400/404). Retry until it is
+          # finalizable instead of failing the release on that race.
+          for attempt in $(seq 1 12); do
+            CODE=$(curl -sS -o /tmp/finalize.txt -w '%{http_code}' -X POST -H "Authorization: Bearer $AUTH" "$URL")
+            echo "attempt $attempt: HTTP $CODE"; cat /tmp/finalize.txt; echo
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+              echo "Finalize succeeded."
+              exit 0
+            fi
+            echo "Staging repository not finalizable yet; waiting 15s before retry..."
+            sleep 15
+          done
+          echo "Finalize did not succeed after retries."
+          exit 1
         env:
           OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
