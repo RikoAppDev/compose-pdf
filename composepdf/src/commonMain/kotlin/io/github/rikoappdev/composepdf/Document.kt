@@ -233,10 +233,22 @@ class PdfDocumentSpec internal constructor(
      * keeps the engine font-agnostic and dependency-free, and works identically on every platform
      * (the app reads its own bundled `.ttf` via its resource mechanism). Only the glyphs a document
      * uses are subset and embedded.
+     *
+     * [onProgress], when supplied, is invoked with a monotonically increasing fraction in `0f..1f`:
+     * `0f` once pagination is done (the total page count is known), then `(page + 1) / total` (scaled
+     * to leave a small tail) as each page's content is serialized, and exactly `1f` once the final
+     * byte array is assembled. It is purely observational — the produced bytes are byte-for-byte
+     * identical whether or not a callback is passed.
      */
-    fun render(regularFontBytes: ByteArray, boldFontBytes: ByteArray): ByteArray {
+    fun render(
+        regularFontBytes: ByteArray,
+        boldFontBytes: ByteArray,
+        onProgress: ((Float) -> Unit)? = null,
+    ): ByteArray {
         val book = FontBook(regularFontBytes, boldFontBytes)
-        return serializePdf(layout(this, book), book, images)
+        val pages = layout(this, book)
+        onProgress?.invoke(0f)
+        return serializePdf(pages, book, images, onProgress)
     }
 }
 

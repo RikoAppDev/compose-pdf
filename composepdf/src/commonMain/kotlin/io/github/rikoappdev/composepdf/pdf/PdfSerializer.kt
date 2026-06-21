@@ -20,7 +20,12 @@ internal class JpegImage(val width: Int, val height: Int, val components: Int, v
  * PDF byte stream. Flips y to PDF's bottom-left origin. Text/content streams, the subset font
  * program and the ToUnicode CMap are FlateDecode-compressed; JPEG images stay as raw /DCTDecode.
  */
-internal fun serializePdf(pages: List<Page>, book: FontBook, images: List<JpegImage>): ByteArray {
+internal fun serializePdf(
+    pages: List<Page>,
+    book: FontBook,
+    images: List<JpegImage>,
+    onProgress: ((Float) -> Unit)? = null,
+): ByteArray {
     val doc = PdfDoc()
     val catalog = doc.reserve()
     val pagesObj = doc.reserve()
@@ -53,7 +58,8 @@ internal fun serializePdf(pages: List<Page>, book: FontBook, images: List<JpegIm
     val resources = "<< /Font << $fontEntries >> /XObject << $imgEntries >> >>"
 
     val pageNums = ArrayList<Int>()
-    for (page in pages) {
+    val total = pages.size
+    for ((index, page) in pages.withIndex()) {
         val content = doc.add(streamObject("", buildContent(page, fontRes, imgRes), compress = true))
         pageNums.add(
             doc.addDict(
@@ -61,10 +67,14 @@ internal fun serializePdf(pages: List<Page>, book: FontBook, images: List<JpegIm
                     "/Resources $resources /Contents $content 0 R >>"
             )
         )
+        // Per-page progress, scaled to ≤ 0.99 so the final assembly keeps a visible tail.
+        onProgress?.invoke((index + 1).toFloat() / total * 0.99f)
     }
     doc.setDict(pagesObj, "<< /Type /Pages /Kids [${pageNums.joinToString(" ") { "$it 0 R" }}] /Count ${pageNums.size} >>")
     doc.setDict(catalog, "<< /Type /Catalog /Pages $pagesObj 0 R >>")
-    return doc.build(rootObj = catalog)
+    val bytes = doc.build(rootObj = catalog)
+    onProgress?.invoke(1f)
+    return bytes
 }
 
 private fun buildContent(
