@@ -23,7 +23,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Upload signed artifacts to the OSSRH Staging API
+      # Stage every signed publication into a local Maven layout (composepdf/build/staging-deploy).
+      - name: Stage signed artifacts
         run: |
           chmod +x ./gradlew
           ./gradlew publishAllPublicationsToMavenCentralRepository --no-configuration-cache
@@ -31,32 +32,26 @@ jobs:
           SIGNING_KEY_ID: ${{ secrets.GPG_KEY_ID }}
           SIGNING_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           SIGNING_PASSWORD: ${{ secrets.GPG_PASSPHRASE }}
-          OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-          OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
 
-      # The raw maven-publish upload lands in an OPEN OSSRH staging repository that is NOT visible in
-      # the Central Portal until it is finalized — and the finalize call must come from the same IP
-      # that uploaded (this runner). publishing_type=automatic releases it once validation passes.
-      - name: Finalize deployment to Central Portal
+      # Upload the bundle to the Central Portal Publisher API — the native path, with no legacy OSSRH
+      # staging repository or finalize step (that combination published to the Portal but did not
+      # reliably sync to the CDN). publishingType=AUTOMATIC validates and releases automatically.
+      - name: Upload bundle to the Central Portal
         run: |
+          STAGE="composepdf/build/staging-deploy"
+          if [ ! -d "$STAGE" ]; then echo "Staging dir $STAGE not found"; exit 1; fi
+          echo "Bundle contents:"; ( cd "$STAGE" && find . -type f | sed 's#^#  #' )
+          ( cd "$STAGE" && zip -q -r "$GITHUB_WORKSPACE/central-bundle.zip" . )
+          VERSION=$(grep '^VERSION_NAME=' gradle.properties | cut -d= -f2)
           AUTH=$(printf '%s:%s' "$OSSRH_USERNAME" "$OSSRH_PASSWORD" | base64 | tr -d '\n')
-          URL="https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/io.github.rikoappdev?publishing_type=automatic"
+          URL="https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC&name=compose-pdf-$VERSION"
           echo "POST $URL"
-          # The OPEN staging repository can take a short while to register after the upload, so the
-          # finalize call may briefly get "No repository found" (HTTP 400/404). Retry until it is
-          # finalizable instead of failing the release on that race.
-          for attempt in $(seq 1 12); do
-            CODE=$(curl -sS -o /tmp/finalize.txt -w '%{http_code}' -X POST -H "Authorization: Bearer $AUTH" "$URL")
-            echo "attempt $attempt: HTTP $CODE"; cat /tmp/finalize.txt; echo
-            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
-              echo "Finalize succeeded."
-              exit 0
-            fi
-            echo "Staging repository not finalizable yet; waiting 15s before retry..."
-            sleep 15
-          done
-          echo "Finalize did not succeed after retries."
-          exit 1
+          CODE=$(curl -sS -o /tmp/upload.txt -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $AUTH" \
+            -F "bundle=@$GITHUB_WORKSPACE/central-bundle.zip" \
+            "$URL")
+          echo "HTTP $CODE"; echo "Deployment id: $(cat /tmp/upload.txt)"; echo
+          test "$CODE" -ge 200 -a "$CODE" -lt 300
         env:
           OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
