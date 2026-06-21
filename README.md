@@ -42,6 +42,25 @@ val pdf: ByteArray = pdfDocument(PageConfig(margin = 36.dp)) {
 }.render(regularFontBytes, boldFontBytes)
 ```
 
+## Gallery
+
+A set of ready-made example documents ships in `commonMain` under
+[`examples/ExampleDocuments.kt`](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt).
+[`GalleryExportTest`](composepdf/src/jvmTest/kotlin/io/github/rikoappdev/composepdf/GalleryExportTest.kt)
+renders each one to the files below — regenerate with
+`./gradlew :composepdf:jvmTest --tests "*GalleryExportTest"`.
+
+> Every value in these documents is invented, generic placeholder data — the fictitious
+> Contoso / Northwind / Fabrikam companies and reserved `.example` addresses. They exist only to
+> demonstrate the engine (text flow, weighted rows, nested rounded boxes, tables with zebra
+> striping / totals / repeating headers, automatic pagination, page numbers, and image layout).
+
+| | |
+|---|---|
+| **[Invoice](samples/invoice.pdf)** — weighted header columns, line-item table, stacked totals<br><a href="samples/invoice.pdf"><img src="samples/invoice.png" width="330" alt="Invoice example"></a> | **[Business letter](samples/business-letter.pdf)** — letterhead and automatically wrapped body paragraphs<br><a href="samples/business-letter.pdf"><img src="samples/business-letter.png" width="330" alt="Business letter example"></a> |
+| **[Price list](samples/price-list.pdf)** — repeating header band, multiple categorized tables<br><a href="samples/price-list.pdf"><img src="samples/price-list.png" width="330" alt="Price list example"></a> | **[Status report](samples/status-report.pdf)** — summary box, metric cards, milestones table<br><a href="samples/status-report.pdf"><img src="samples/status-report.png" width="330" alt="Status report example"></a> |
+| **[Transaction ledger](samples/transaction-ledger.pdf)** — 90 rows over **3 pages**, auto-paginated with a repeating table header and page numbers<br><a href="samples/transaction-ledger.pdf"><img src="samples/transaction-ledger.png" width="330" alt="Transaction ledger example"></a> | **[Photo gallery](samples/photo-gallery.pdf)** — mixed aspect ratios laid out with `PhotoFit.Smart` / `Contain`<br><a href="samples/photo-gallery.pdf"><img src="samples/photo-gallery.png" width="330" alt="Photo gallery example"></a> |
+
 ## Fonts
 
 Fonts are supplied by **your application**, not bundled in the library. `render` takes the Regular
