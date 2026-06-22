@@ -12,8 +12,31 @@ import io.github.rikoappdev.composepdf.util.ByteBuf
 import io.github.rikoappdev.composepdf.util.toHex4
 import kotlin.math.roundToInt
 
+/** An image to embed in the PDF: either a JPEG (raw /DCTDecode) or a decoded PNG (/FlateDecode). */
+internal sealed interface EmbeddedImage {
+    val width: Int
+    val height: Int
+}
+
 /** A JPEG ready to embed via /DCTDecode (raw bytes, no re-encode). [components]: 1=gray, 3=RGB. */
-internal class JpegImage(val width: Int, val height: Int, val components: Int, val bytes: ByteArray)
+internal class JpegImage(
+    override val width: Int,
+    override val height: Int,
+    val components: Int,
+    val bytes: ByteArray,
+) : EmbeddedImage
+
+/**
+ * A decoded PNG: 8-bit RGB pixels (deflated into a /DeviceRGB image) plus an optional 8-bit alpha
+ * plane (deflated into a /DeviceGray /SMask). Both planes are FlateDecode-compressed via the same
+ * pure-Kotlin [zlibCompress] used for content/font streams, so the bytes are identical per platform.
+ */
+internal class PngImageData(
+    override val width: Int,
+    override val height: Int,
+    val rgb: ByteArray,
+    val alpha: ByteArray?,
+) : EmbeddedImage
 
 /**
  * Turns laid-out [pages] (top-left-origin draw ops) + the [book]'s used fonts + [images] into a
@@ -23,7 +46,7 @@ internal class JpegImage(val width: Int, val height: Int, val components: Int, v
 internal fun serializePdf(
     pages: List<Page>,
     book: FontBook,
-    images: List<JpegImage>,
+    images: List<EmbeddedImage>,
     onProgress: ((Float) -> Unit)? = null,
 ): ByteArray {
     val doc = PdfDoc()
@@ -42,14 +65,40 @@ internal fun serializePdf(
 
     val imgRes = ArrayList<Pair<String, Int>>()
     for ((i, img) in images.withIndex()) {
-        val colorSpace = if (img.components == 1) "/DeviceGray" else "/DeviceRGB"
-        val num = doc.add(
-            streamObject(
-                "/Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} " +
-                    "/ColorSpace $colorSpace /BitsPerComponent 8 /Filter /DCTDecode",
-                img.bytes,
-            )
-        )
+        val num = when (img) {
+            is JpegImage -> {
+                val colorSpace = if (img.components == 1) "/DeviceGray" else "/DeviceRGB"
+                doc.add(
+                    streamObject(
+                        "/Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} " +
+                            "/ColorSpace $colorSpace /BitsPerComponent 8 /Filter /DCTDecode",
+                        img.bytes,
+                    )
+                )
+            }
+            is PngImageData -> {
+                // Optional soft mask: a single-channel /DeviceGray image deflated and referenced via /SMask.
+                val smaskRef = img.alpha?.let { alpha ->
+                    val maskNum = doc.add(
+                        streamObject(
+                            "/Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} " +
+                                "/ColorSpace /DeviceGray /BitsPerComponent 8",
+                            alpha,
+                            compress = true,
+                        )
+                    )
+                    " /SMask $maskNum 0 R"
+                } ?: ""
+                doc.add(
+                    streamObject(
+                        "/Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} " +
+                            "/ColorSpace /DeviceRGB /BitsPerComponent 8$smaskRef",
+                        img.rgb,
+                        compress = true,
+                    )
+                )
+            }
+        }
         imgRes.add("Im$i" to num)
     }
 
