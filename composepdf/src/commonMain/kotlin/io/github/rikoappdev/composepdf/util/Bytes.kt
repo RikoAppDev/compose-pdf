@@ -45,6 +45,8 @@ internal class ByteBuf(initial: Int = 1024) {
     fun u32(v: Long) { u8((v ushr 24).toInt()); u8((v ushr 16).toInt()); u8((v ushr 8).toInt()); u8(v.toInt()) }
     fun u32(v: Int) { u32(v.toLong() and 0xFFFFFFFFL) }
     fun bytes(b: ByteArray) { ensure(b.size); b.copyInto(buf, size); size += b.size }
+    /** Reads a previously written byte (unsigned 0..255). Used by INFLATE's LZ77 back-references. */
+    fun byteAt(index: Int): Int = buf[index].toInt() and 0xFF
     /** Writes [s] as one byte per char (Latin-1/ASCII) — correct for PDF syntax tokens. */
     fun ascii(s: String) { ensure(s.length); for (c in s) buf[size++] = (c.code and 0xFF).toByte() }
     fun padTo(align: Int) { while (size % align != 0) u8(0) }

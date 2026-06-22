@@ -24,7 +24,7 @@ to users.
 ## Features
 
 - Embedded **subset Type0/CIDFontType2 (Identity-H) + ToUnicode** → selectable & searchable text, including Latin diacritics (composite glyphs subset correctly).
-- **Compose-style DSL**: `text`, `spacer`, `divider`, `row { cell(weight) { } }`, `column`, `box(padding, border, background)`, `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through; `PhotoFit.Cover` / `Contain` / `Smart` — smart preserves aspect but crops extreme strips), `table` (weighted columns, repeating header, total rows, optional `zebra` striping).
+- **Compose-style DSL**: `text`, `spacer`, `divider`, `row { cell(weight) { } }`, `column`, `box(padding, border, background)`, `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through **and PNG** — decoded in pure Kotlin to a `/FlateDecode` image with an `/SMask` for transparency; `PhotoFit.Cover` / `Contain` / `Smart` — smart preserves aspect but crops extreme strips), `table` (weighted columns, repeating header, total rows, optional `zebra` striping).
 - **Header / footer / page numbers**: repeating `header`/`footer` bands and an auto page-number line whose space is reserved (content never overlaps it). `PageConfig` controls it all — `repeatHeader` (every page vs. first page only, like a title block), `pageNumberFormat`, `pageNumberStyle`, `pageNumbers`.
 - Familiar value types: `TextStyle` (with `copy`), `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight`, `TextAlign`.
 - **Automatic pagination**: paragraphs split by line; tables split by row (repeating the header); bordered **boxes and columns split across pages** with the border/background redrawn per fragment; rows and images stay atomic (never cut). Optional keep-together moves a block whole instead of leaving a sliver.
@@ -97,6 +97,7 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 
 - Live `@Composable` preview bridge — draw the engine's computed glyph/box positions onto a Compose `Canvas` for an on-screen preview (the PDF stays the source of truth).
 - GPOS kerning / ligatures (v1 uses advance-width shaping).
-- More image formats (currently JPEG `/DCTDecode` only).
+- Importing vector assets (SVG / Android VectorDrawable) as native PDF vector paths.
+- More image formats (JPEG + PNG today; WebP/others later).
 - Complex scripts / RTL / bidi.
 - Long-word breaking inside narrow columns.

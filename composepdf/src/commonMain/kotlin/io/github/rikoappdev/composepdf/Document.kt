@@ -2,6 +2,9 @@ package io.github.rikoappdev.composepdf
 
 import io.github.rikoappdev.composepdf.font.FontBook
 import io.github.rikoappdev.composepdf.font.TextMetrics
+import io.github.rikoappdev.composepdf.image.decodePng
+import io.github.rikoappdev.composepdf.image.isJpeg
+import io.github.rikoappdev.composepdf.image.isPng
 import io.github.rikoappdev.composepdf.image.parseJpeg
 import io.github.rikoappdev.composepdf.layout.BoxNode
 import io.github.rikoappdev.composepdf.layout.ColumnNode
@@ -19,7 +22,9 @@ import io.github.rikoappdev.composepdf.layout.drawTableRow
 import io.github.rikoappdev.composepdf.layout.measure
 import io.github.rikoappdev.composepdf.layout.tableColumnWidths
 import io.github.rikoappdev.composepdf.layout.tableRowHeight
+import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
 import io.github.rikoappdev.composepdf.pdf.JpegImage
+import io.github.rikoappdev.composepdf.pdf.PngImageData
 import io.github.rikoappdev.composepdf.pdf.serializePdf
 import io.github.rikoappdev.composepdf.render.Page
 import io.github.rikoappdev.composepdf.render.RectOp
@@ -56,7 +61,7 @@ class PageConfig(
 
 /** Compose-style container: stacks children vertically. Shared by the document root, columns,
  *  box contents and row cells, so authoring reads like nested Compose. */
-open class ContainerScope internal constructor(internal val images: MutableList<JpegImage>) {
+open class ContainerScope internal constructor(internal val images: MutableList<EmbeddedImage>) {
     internal val nodes = ArrayList<Node>()
 
     fun text(text: String, style: TextStyle = TextStyle()) { nodes.add(TextNode(text, style)) }
@@ -107,16 +112,33 @@ open class ContainerScope internal constructor(internal val images: MutableList<
         )
     }
 
-    /** Embeds a JPEG. [width] = 0.dp fills the available width. [fit] controls cover/contain/smart. */
-    fun image(jpegBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover) {
-        val info = parseJpeg(jpegBytes)
+    /**
+     * Embeds an image. The format is auto-detected from the bytes' magic number: JPEG (`FF D8 FF`)
+     * is embedded verbatim via `/DCTDecode`; PNG (`89 50 4E 47 …`) is decoded to RGB pixels and
+     * embedded via `/FlateDecode`, with transparency carried as a `/SMask`. [width] = 0.dp fills the
+     * available width. [fit] controls cover/contain/smart. The intrinsic size comes from the JPEG SOF
+     * / PNG IHDR. Throws if the bytes are neither JPEG nor PNG, or an unsupported PNG variant.
+     */
+    fun image(imageBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover) {
         val index = images.size
-        images.add(JpegImage(info.width, info.height, info.components, jpegBytes))
-        nodes.add(ImageNode(index, width.value, height.value, info.width, info.height, fit))
+        val (iw, ih) = when {
+            isPng(imageBytes) -> {
+                val png = decodePng(imageBytes)
+                images.add(PngImageData(png.width, png.height, png.rgb, png.alpha))
+                png.width to png.height
+            }
+            isJpeg(imageBytes) -> {
+                val info = parseJpeg(imageBytes)
+                images.add(JpegImage(info.width, info.height, info.components, imageBytes))
+                info.width to info.height
+            }
+            else -> throw IllegalArgumentException("Unsupported image format (expected JPEG or PNG)")
+        }
+        nodes.add(ImageNode(index, width.value, height.value, iw, ih, fit))
     }
 
     /**
-     * Lays out [photos] (JPEG bytes) in a grid of [perRow] equal cells, each [cellHeight] tall.
+     * Lays out [photos] (JPEG or PNG bytes) in a grid of [perRow] equal cells, each [cellHeight] tall.
      * [fit] = [PhotoFit.Cover] crops each photo to fill its cell; [PhotoFit.Contain] fits the whole
      * photo preserving aspect; [PhotoFit.Smart] preserves aspect but crops extreme-aspect photos so
      * they don't become thin slivers.
@@ -191,7 +213,7 @@ class TableScope internal constructor(
 }
 
 /** Distributes width across weighted cells (like `Modifier.weight`). */
-class RowScope internal constructor(private val images: MutableList<JpegImage>) {
+class RowScope internal constructor(private val images: MutableList<EmbeddedImage>) {
     private val cells = ArrayList<RowChild>()
 
     fun cell(weight: Float = 1f, build: ContainerScope.() -> Unit) {
@@ -201,7 +223,7 @@ class RowScope internal constructor(private val images: MutableList<JpegImage>) 
     internal fun toNode(gapPt: Int) = RowNode(cells.toList(), gapPt)
 }
 
-class PdfContentScope internal constructor(images: MutableList<JpegImage>) : ContainerScope(images) {
+class PdfContentScope internal constructor(images: MutableList<EmbeddedImage>) : ContainerScope(images) {
     internal var headerNodes: List<Node>? = null
     internal var footerNodes: List<Node>? = null
 
@@ -213,7 +235,7 @@ class PdfContentScope internal constructor(images: MutableList<JpegImage>) : Con
 }
 
 fun pdfDocument(config: PageConfig = PageConfig(), build: PdfContentScope.() -> Unit): PdfDocumentSpec {
-    val images = ArrayList<JpegImage>()
+    val images = ArrayList<EmbeddedImage>()
     val scope = PdfContentScope(images).apply(build)
     return PdfDocumentSpec(config, scope.nodes, images, scope.headerNodes, scope.footerNodes)
 }
@@ -221,7 +243,7 @@ fun pdfDocument(config: PageConfig = PageConfig(), build: PdfContentScope.() -> 
 class PdfDocumentSpec internal constructor(
     internal val config: PageConfig,
     internal val nodes: List<Node>,
-    internal val images: List<JpegImage>,
+    internal val images: List<EmbeddedImage>,
     internal val headerNodes: List<Node>?,
     internal val footerNodes: List<Node>?,
 ) {
