@@ -144,6 +144,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * they don't become thin slivers.
      */
     fun photoGrid(photos: List<ByteArray>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, fit: PhotoFit = PhotoFit.Cover) {
+        require(perRow >= 1) { "photoGrid perRow must be >= 1" }
         photos.chunked(perRow).forEachIndexed { rowIndex, chunk ->
             if (rowIndex > 0) spacer(gap)
             row(gap) {
@@ -435,10 +436,22 @@ private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig
         is TableNode -> flowTable(node, x, availW, ctx, cfg)
         is RowNode, is ImageNode -> {
             // Atomic — never split; move whole to the next page if it doesn't fit.
-            val p = measure(node, availW, ctx.book)
-            if (ctx.y + p.heightPt > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
-            p.place(x, ctx.y, ctx.page.ops)
-            ctx.y += p.heightPt
+            val usableH = ctx.usableBottom - ctx.topY
+            if (node is ImageNode && node.heightPt > usableH) {
+                // An image taller than a whole page can never fit; clamp it to the usable height so
+                // it doesn't draw past the page bottom into the footer. Valid documents use image
+                // heights far smaller than a page, so this never triggers for them.
+                if (ctx.y > ctx.topY) ctx.newPage()
+                val clamped = ImageNode(node.imageIndex, node.widthPt, usableH, node.intrinsicW, node.intrinsicH, node.fit)
+                val p = measure(clamped, availW, ctx.book)
+                p.place(x, ctx.y, ctx.page.ops)
+                ctx.y += p.heightPt
+            } else {
+                val p = measure(node, availW, ctx.book)
+                if (ctx.y + p.heightPt > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
+                p.place(x, ctx.y, ctx.page.ops)
+                ctx.y += p.heightPt
+            }
         }
     }
 }

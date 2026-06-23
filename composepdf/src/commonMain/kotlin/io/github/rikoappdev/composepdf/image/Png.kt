@@ -139,6 +139,12 @@ private fun finishDecode(
     // bytesPerPixel for the filter (rounded up to a whole byte; 1 for sub-byte packed depths).
     val bpp = (bitsPerPixel + 7) / 8
     val stride = bytesPerScanline + 1 // +1 filter-type byte per scanline
+    // Guard against Int overflow on hostile/corrupt dimensions before allocating buffers.
+    require(
+        width > 0 && height > 0 &&
+            width.toLong() * height <= (Int.MAX_VALUE / 3).toLong() &&
+            stride.toLong() * height <= Int.MAX_VALUE.toLong()
+    ) { "PNG dimensions too large or invalid: ${width}x$height" }
     require(raw.size >= stride * height) {
         "PNG inflated data too short: ${raw.size} < ${stride * height}"
     }
@@ -202,7 +208,8 @@ private fun finishDecode(
                 val row = i / width
                 val col = i % width
                 val index = readPackedIndex(unfiltered, row * bytesPerScanline, col, bitDepth)
-                val color = if (index < pal.size) pal[index] else 0
+                require(index < pal.size) { "PNG palette index $index out of range (${pal.size})" }
+                val color = pal[index]
                 rgb[i * 3] = ((color shr 16) and 0xFF).toByte()
                 rgb[i * 3 + 1] = ((color shr 8) and 0xFF).toByte()
                 rgb[i * 3 + 2] = (color and 0xFF).toByte()

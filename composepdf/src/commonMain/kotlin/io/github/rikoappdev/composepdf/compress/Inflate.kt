@@ -124,7 +124,7 @@ private val CL_ORDER = intArrayOf(16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3
 /** Inflates raw DEFLATE data beginning at [start] until the final block is consumed. */
 internal fun inflateRaw(data: ByteArray, start: Int = 0): ByteArray {
     val br = BitReader(data, start)
-    val out = ByteBuf(data.size * 4 + 64)
+    val out = ByteBuf((data.size.toLong() * 4 + 64).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
     var final = false
     while (!final) {
         final = br.readBit() == 1
@@ -145,7 +145,8 @@ internal fun inflateRaw(data: ByteArray, start: Int = 0): ByteArray {
 private fun inflateStored(br: BitReader, out: ByteBuf) {
     br.alignToByte()
     val len = br.readByte() or (br.readByte() shl 8)
-    br.readByte(); br.readByte() // NLEN (one's complement of LEN) — not validated
+    val nlen = br.readByte() or (br.readByte() shl 8) // NLEN = one's complement of LEN
+    require((len xor 0xFFFF) == nlen) { "Corrupt stored block: LEN/NLEN mismatch" }
     repeat(len) { out.u8(br.readByte()) }
 }
 
@@ -161,6 +162,7 @@ private fun inflateBlock(br: BitReader, out: ByteBuf, lit: HuffmanTable, dist: H
                 require(li < LEN_BASE.size) { "Invalid length symbol $sym" }
                 val length = LEN_BASE[li] + br.readBits(LEN_EXTRA[li])
                 val ds = dist.decode(br)
+                require(ds < DIST_BASE_T.size) { "Invalid distance symbol $ds" }
                 val distance = DIST_BASE_T[ds] + br.readBits(DIST_EXTRA_T[ds])
                 copyBackReference(out, distance, length)
             }

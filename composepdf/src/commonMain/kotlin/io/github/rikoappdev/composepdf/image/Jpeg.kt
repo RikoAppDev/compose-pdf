@@ -5,8 +5,10 @@ internal class JpegInfo(val width: Int, val height: Int, val components: Int)
 
 /**
  * Reads width/height/components from a JPEG's Start-Of-Frame marker without decoding pixels — the
- * bytes are embedded verbatim via /DCTDecode. Throws on non-JPEG or CMYK (4-component), which
- * needs a Decode array (out of scope for v1).
+ * bytes are embedded verbatim via /DCTDecode. Only baseline (C0), extended-sequential (C1) and
+ * progressive (C2) Huffman frames are recognized; lossless/arithmetic frames — which /DCTDecode
+ * cannot render — are ignored (yielding "no SOF" rather than an unrenderable image). Throws on
+ * non-JPEG or CMYK (4-component), which needs a Decode array (out of scope for v1).
  */
 internal fun parseJpeg(bytes: ByteArray): JpegInfo {
     require(bytes.size > 4 && (bytes[0].toInt() and 0xFF) == 0xFF && (bytes[1].toInt() and 0xFF) == 0xD8) {
@@ -21,8 +23,11 @@ internal fun parseJpeg(bytes: ByteArray): JpegInfo {
         if (marker == 0x01 || marker in 0xD0..0xD9) continue
         if (i + 1 >= bytes.size) break
         val len = ((bytes[i].toInt() and 0xFF) shl 8) or (bytes[i + 1].toInt() and 0xFF)
-        // SOF markers carry frame geometry (exclude DHT 0xC4, JPG 0xC8, DAC 0xCC).
-        if (marker in 0xC0..0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
+        // SOF markers carry frame geometry. Only the Huffman frame types /DCTDecode can render:
+        // baseline (C0), extended-sequential (C1), progressive (C2). Lossless (C3), differential
+        // (C5-C7) and arithmetic-coded (C9-CB, CD-CF) frames are skipped like any other segment.
+        if (marker == 0xC0 || marker == 0xC1 || marker == 0xC2) {
+            require(i + 7 < bytes.size) { "Truncated JPEG SOF" }
             val height = ((bytes[i + 3].toInt() and 0xFF) shl 8) or (bytes[i + 4].toInt() and 0xFF)
             val width = ((bytes[i + 5].toInt() and 0xFF) shl 8) or (bytes[i + 6].toInt() and 0xFF)
             val components = bytes[i + 7].toInt() and 0xFF
