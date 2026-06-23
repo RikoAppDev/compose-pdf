@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 rootProject.name = "compose-pdf"
 
 include(":composepdf")
+include(":composepdf-preview")

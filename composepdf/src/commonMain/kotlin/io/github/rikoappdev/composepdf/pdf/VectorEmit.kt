@@ -76,7 +76,7 @@ internal fun buildVectorForm(model: VectorModel): VectorForm {
     val resources = if (gstates.isEmpty()) "<< >>"
     else "<< /ExtGState << " + gstates.entries.joinToString(" ") { "/${it.value} << ${it.key} >>" } + " >> >>"
 
-    return VectorForm(vw, vh, asciiBytes(sb.toString()), resources)
+    return VectorForm(vw, vh, asciiBytes(sb.toString()), resources, model)
 }
 
 /** A color component (0..255) as a deterministic 0..1 decimal string. */

@@ -51,6 +51,8 @@ internal class VectorForm(
     override val height: Int,
     val content: ByteArray,
     val resources: String,
+    /** Kept so the on-screen preview can flatten the same paths to a Compose Canvas. */
+    val model: io.github.rikoappdev.composepdf.vector.VectorModel,
 ) : EmbeddedImage
 
 /**
