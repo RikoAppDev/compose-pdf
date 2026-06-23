@@ -50,6 +50,22 @@ internal class ImageOp(
     val fit: PhotoFit,
 ) : DrawOp
 
+/**
+ * Draws vector form XObject [imageIndex] into the box at (x, y). [intrinsicW]/[intrinsicH] are the
+ * vector's viewport; [fit] decides cover/contain/smart just like [ImageOp]. The serializer scales
+ * the form's BBox (viewport) to the chosen draw size.
+ */
+internal class VectorOp(
+    val xPt: Int,
+    val yPt: Int,
+    val wPt: Int,
+    val hPt: Int,
+    val imageIndex: Int,
+    val intrinsicW: Int,
+    val intrinsicH: Int,
+    val fit: PhotoFit,
+) : DrawOp
+
 internal class Page(val widthPt: Int, val heightPt: Int) {
     val ops = ArrayList<DrawOp>()
 }
