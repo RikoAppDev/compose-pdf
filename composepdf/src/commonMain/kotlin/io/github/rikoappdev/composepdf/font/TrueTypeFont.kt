@@ -94,9 +94,11 @@ internal class TrueTypeFont(val data: ByteArray) {
 
     /** Advance width of [gid] in font units. */
     fun advanceWidth(gid: Int): Int {
-        val n = numberOfHMetrics
-        return if (gid < n) r.u16At(hmtxOffset + gid * 4)
-        else r.u16At(hmtxOffset + (n - 1) * 4)
+        // maxOf(1, ...) guards a malformed hhea with numberOfHMetrics == 0 (which would read
+        // before the hmtx table); behavior is unchanged for valid fonts (n >= 1, gid in range).
+        val n = maxOf(1, numberOfHMetrics)
+        val i = minOf(gid, n - 1).coerceAtLeast(0)
+        return r.u16At(hmtxOffset + i * 4)
     }
 
     /** Raw glyph bytes from the glyf table (empty for whitespace/empty glyphs). */
