@@ -68,6 +68,35 @@ the catalogue an **SVG**.
 | **Transaction ledger** — 90 rows over **3 pages**, repeating table header + page numbers.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L344) · [PDF](samples/transaction-ledger.pdf)<br><a href="samples/transaction-ledger.pdf"><img src="samples/transaction-ledger.png" width="330" alt="Transaction ledger example"></a> | **Photo gallery** — mixed aspect ratios laid out with `PhotoFit.Smart` / `Contain`.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L391) · [PDF](samples/photo-gallery.pdf)<br><a href="samples/photo-gallery.pdf"><img src="samples/photo-gallery.png" width="330" alt="Photo gallery example"></a> |
 | **Résumé** — weighted two-column CV, section headings, a skills table; 1 page.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L833) · [PDF](samples/resume.pdf)<br><a href="samples/resume.pdf"><img src="samples/resume.png" width="330" alt="Résumé example"></a> | **Event program** — header band + agenda schedule tables; 1 page.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L919) · [PDF](samples/event-program.pdf)<br><a href="samples/event-program.pdf"><img src="samples/event-program.png" width="330" alt="Event program example"></a> |
 
+## Live preview (design-time `@Preview`)
+
+The optional **`compose-pdf-preview`** artifact renders a `pdfDocument { … }` spec onto a Compose
+`Canvas`, reusing the engine's **computed layout** — so you see your document **in the IDE preview
+pane as you edit the builder**, with no app run and no export. It's a design-time tool (like a
+`@Preview` of a screen), not an in-app "view instead of download" button.
+
+```kotlin
+// in androidMain — Android Studio renders androidMain @Preview live
+@Preview
+@Composable
+fun MyReportPreview() = PdfPreview(
+    myReport(data),                            // your pdfDocument { … } spec
+    previewFontRegular(), previewFontBold(),   // a bundled font, loaded SYNCHRONOUSLY for @Preview
+)
+```
+
+- `previewFontRegular()` / `previewFontBold()` load a bundled Noto Sans **synchronously** — the async
+  Compose-resources API does not work in the IDE preview runtime. (For the real export, pass your own
+  `.ttf` to `render()`; the core stays font-agnostic and bundles no font.)
+- Ready-to-open examples ship in the artifact (`ExamplePreviews.kt`): open it in the IDE and the pane
+  renders the sample documents immediately.
+- The preview runs the **same** layout pass as `render()`, so page count, line breaks, tables, boxes,
+  images and vectors land where the PDF puts them; only intra-line glyph advances use the platform
+  font (a faithful approximation — the PDF stays the source of truth).
+- Targets **Android + JVM** (the platforms with an IDE preview runtime); the core engine remains
+  Android + iOS + JVM. The UI-free `PdfDocumentSpec.previewPages(regular, bold)` in the core returns
+  the resolved per-page draw model if you want to paint it on a different surface.
+
 ## Fonts
 
 Fonts are supplied by **your application**, not bundled in the library. `render` takes the Regular
