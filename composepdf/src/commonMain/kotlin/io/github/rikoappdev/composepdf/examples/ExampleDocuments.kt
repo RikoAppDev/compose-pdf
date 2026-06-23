@@ -409,6 +409,570 @@ object ExampleDocuments {
         photoGrid(photos.take(4), perRow = 2, cellHeight = 150.dp, gap = 10.dp, fit = PhotoFit.Contain)
     }
 
+    // ---- Extra styles & inline vector assets (for the complex samples) --------------------
+    private val cardHead = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ink)
+    private val sidebarHead = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Bold, color = muted)
+
+    /** Inline Android VectorDrawable (a hex badge) — demonstrates the VectorDrawable importer. */
+    private val VD_HEX_BADGE: ByteArray = """
+        <vector xmlns:android="http://schemas.android.com/apk/res/android"
+            android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+          <path android:pathData="M24 3 L43 14 L43 34 L24 45 L5 34 L5 14 Z" android:fillColor="#0F766E"/>
+          <path android:pathData="M24 14 L34 20 L34 30 L24 36 L14 30 L14 20 Z" android:fillColor="#5EEAD4"/>
+        </vector>
+    """.trimIndent().encodeToByteArray()
+
+    /** Inline SVG (a layered badge) — demonstrates the SVG importer (basic shapes + rounded rects). */
+    private val SVG_BADGE: ByteArray = """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect x="2" y="2" width="60" height="60" rx="12" fill="#111827"/>
+          <circle cx="32" cy="23" r="11" fill="#22D3EE"/>
+          <rect x="13" y="38" width="38" height="8" rx="4" fill="#22D3EE"/>
+          <rect x="20" y="50" width="24" height="6" rx="3" fill="#64748B"/>
+        </svg>
+    """.trimIndent().encodeToByteArray()
+
+    // =======================================================================================
+    // 7) Field service report — flagship multi-page: repeating header/footer + page numbers,
+    //    bordered record cards (dark title bar, 3-column summary with totals, task list, note,
+    //    photo grid, signature), VectorDrawable logo. Cards split across pages.
+    // =======================================================================================
+    private data class ServiceVisit(
+        val date: String,
+        val summary: String,
+        val technicians: List<Pair<String, String>>,
+        val totalHours: String,
+        val equipment: List<Pair<String, String>>,
+        val parts: List<Pair<String, String>>,
+        val partsTotal: String,
+        val tasks: List<String>,
+        val note: String,
+        val photoCount: Int,
+    )
+
+    fun fieldServiceReport(photos: List<ByteArray>): PdfDocumentSpec =
+        pdfDocument(PageConfig(margin = 36.dp, pageNumbers = true, repeatHeader = true)) {
+            header {
+                row(gap = 16.dp) {
+                    cell(1f) { vector(VD_HEX_BADGE, height = 30.dp, fit = PhotoFit.Contain) }
+                    cell(2f) {
+                        text("Contoso Facilities", TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ink, align = TextAlign.End))
+                        text("Service provider", small.copy(align = TextAlign.End))
+                        text("dispatch@contoso.example", small.copy(align = TextAlign.End))
+                    }
+                    cell(2f) {
+                        text("Northwind Plant 7", TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ink, align = TextAlign.End))
+                        text("Client site", small.copy(align = TextAlign.End))
+                        text("12 Industrial Way, Lakeside", small.copy(align = TextAlign.End))
+                    }
+                }
+                spacer(8.dp)
+                divider(hairline)
+            }
+            footer { text("Facility Maintenance Report · WO-2026-0317", small.copy(align = TextAlign.Center)) }
+
+            text("Facility Maintenance Report", h1)
+            text("Work order WO-2026-0317 · Reporting window: 8–12 June 2026", small)
+            spacer(12.dp)
+
+            serviceVisits().forEach { serviceCard(it, photos) }
+        }
+
+    private fun serviceVisits(): List<ServiceVisit> {
+        val techs = listOf("Alex Rivera", "Sam Patel", "Jordan Lee", "Casey Morgan", "Drew Nguyen")
+        val taskPool = listOf(
+            "Inspected the air handler and replaced intake filters",
+            "Lubricated conveyor bearings and checked belt tension",
+            "Calibrated temperature sensors in cold storage",
+            "Tested emergency lighting and replaced two ballasts",
+            "Cleared the condensate drain and flushed the line",
+            "Verified fire-suppression pressure gauges",
+            "Tightened electrical-panel connections and logged readings",
+            "Replaced worn gaskets on the pump housing",
+        )
+        return (0 until 7).map { i ->
+            ServiceVisit(
+                date = "${8 + i % 5} Jun 2026 · 08:${if (i % 2 == 0) "00" else "30"}",
+                summary = "Scheduled preventive maintenance — zone ${'A' + i % 4}",
+                technicians = listOf(
+                    techs[i % techs.size] to "${4 + i % 3} h",
+                    techs[(i + 2) % techs.size] to "${3 + i % 2} h",
+                ),
+                totalHours = "${7 + i % 4} h",
+                equipment = listOf(
+                    "Air handler AH-${10 + i}" to "${2 + i % 3} h",
+                    "Conveyor C-${3 + i % 5}" to "${1 + i % 2} h",
+                ),
+                parts = listOf(
+                    "Intake filter (set)" to money(4500),
+                    "Drive belt" to money(3200),
+                    "Sealant cartridge" to money(900),
+                ),
+                partsTotal = money(8600),
+                tasks = (taskPool.drop(i % taskPool.size) + taskPool.take(i % taskPool.size)).take(4),
+                note = if (i % 3 == 0) "Follow-up recommended: order a replacement bearing for the next cycle." else "",
+                photoCount = i % 4,
+            )
+        }
+    }
+
+    private fun ContainerScope.serviceCard(v: ServiceVisit, photos: List<ByteArray>) {
+        box(border = 1.dp, borderColor = Color(0xFFCBD5E1), cornerRadius = 6.dp) {
+            box(padding = 8.dp, background = Color(0xFF334155), cornerRadius = 6.dp) {
+                row {
+                    cell(2f) { text(v.date, TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PdfColor.White)) }
+                    cell(3f) { text(v.summary, TextStyle(fontSize = 8.sp, color = PdfColor.White, align = TextAlign.End)) }
+                }
+            }
+            box(padding = 12.dp) {
+                row(gap = 10.dp) {
+                    cell(1f) {
+                        text("Technicians", cardHead)
+                        spacer(3.dp)
+                        v.technicians.forEach { (n, h) -> labelValueRow(n, h) }
+                        divider(hairline)
+                        labelValueRow("Total hours", v.totalHours, bold = true)
+                    }
+                    cell(1f) {
+                        text("Equipment", cardHead)
+                        spacer(3.dp)
+                        v.equipment.forEach { (n, h) -> labelValueRow(n, h) }
+                    }
+                    cell(1f) {
+                        text("Parts", cardHead)
+                        spacer(3.dp)
+                        v.parts.forEach { (n, p) -> labelValueRow(n, p) }
+                        divider(hairline)
+                        labelValueRow("Parts total", v.partsTotal, bold = true)
+                    }
+                }
+                if (v.tasks.isNotEmpty()) {
+                    spacer(8.dp)
+                    box {
+                        text("Tasks performed", cardHead)
+                        spacer(3.dp)
+                        v.tasks.forEach { t -> text("•  $t", smallInk) }
+                    }
+                }
+                if (v.note.isNotBlank()) {
+                    spacer(8.dp)
+                    box {
+                        text("Notes", cardHead)
+                        spacer(3.dp)
+                        text(v.note, smallInk)
+                    }
+                }
+                if (v.photoCount > 0 && photos.isNotEmpty()) {
+                    spacer(8.dp)
+                    box {
+                        text("Photos", cardHead)
+                        spacer(3.dp)
+                        photoGrid(photos.take(v.photoCount.coerceAtMost(photos.size)), perRow = 3, cellHeight = 66.dp, gap = 6.dp, fit = PhotoFit.Smart)
+                    }
+                }
+                spacer(12.dp)
+                row {
+                    cell(3f) {}
+                    cell(2f) {
+                        spacer(26.dp)
+                        divider(hairline)
+                        spacer(3.dp)
+                        text("Technician signature", small.copy(align = TextAlign.End))
+                    }
+                }
+            }
+        }
+        spacer(10.dp)
+    }
+
+    private fun ContainerScope.labelValueRow(label: String, value: String, bold: Boolean = false) {
+        val ls = if (bold) tdTotal else smallInk
+        val vs = (if (bold) tdTotal else smallInk).copy(align = TextAlign.End)
+        row { cell(3f) { text(label, ls) }; cell(2f) { text(value, vs) } }
+    }
+
+    // =======================================================================================
+    // 8) Annual report — title + metric cards, then a large multi-page ledger with a repeating
+    //    header, zebra striping, periodic subtotals and a grand total.
+    // =======================================================================================
+    fun annualReport(): PdfDocumentSpec = pdfDocument(PageConfig(margin = 40.dp, pageNumbers = true)) {
+        header {
+            row {
+                cell(1f) { text("Fabrikam, Inc.", TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ink)) }
+                cell(1f) { text("Annual Financial Report 2026", small.copy(align = TextAlign.End)) }
+            }
+            spacer(4.dp)
+            divider(hairline)
+        }
+        footer { text("Fabrikam, Inc. · Confidential", small.copy(align = TextAlign.Center)) }
+
+        text("Annual Financial Report", h1)
+        text("Fiscal year ending 31 December 2026 · all amounts in USD", small)
+        spacer(14.dp)
+
+        row(gap = 12.dp) {
+            cell(1f) { metricCard("\$12.8M", "Total revenue", accent) }
+            cell(1f) { metricCard("\$4.1M", "Net profit", Color(0xFF16A34A)) }
+            cell(1f) { metricCard("+18%", "YoY growth", Color(0xFF0EA5E9)) }
+            cell(1f) { metricCard("342", "Active clients", Color(0xFFEA580C)) }
+        }
+        spacer(16.dp)
+
+        text("General ledger — detailed transactions", h2)
+        spacer(6.dp)
+        ledgerTable(rowCount = 120)
+    }
+
+    private fun ContainerScope.ledgerTable(rowCount: Int) {
+        val descriptions = listOf(
+            "Client invoice payment", "Cloud hosting", "Office supplies", "Travel reimbursement",
+            "Equipment purchase", "Software licence", "Consulting fee", "Utility bill",
+            "Marketing spend", "Bank charges", "Shipping & handling", "Refund issued",
+        )
+        val categories = listOf("Revenue", "Infrastructure", "Operations", "Travel", "Capex", "Marketing")
+        var running = 0L
+        var block = 0L
+        styledTable(
+            columns = listOf(
+                PdfColumn(1.3f, "Date"),
+                PdfColumn(1.5f, "Reference"),
+                PdfColumn(3f, "Description"),
+                PdfColumn(1.5f, "Category"),
+                PdfColumn(1.6f, "Amount", TextAlign.End),
+            ),
+            repeatHeader = true,
+        ) {
+            for (i in 0 until rowCount) {
+                val day = (i % 28) + 1
+                val month = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun")[(i / 28) % 6]
+                val date = (if (day < 10) "0$day" else "$day") + " " + month
+                val reference = "TXN-" + (100_000 + i)
+                val magnitude = 1_800L + ((i * 7_919L) % 520_000L)
+                val signed = if (i % 6 == 5) -magnitude else magnitude
+                running += signed
+                block += signed
+                row(date, reference, descriptions[i % descriptions.size], categories[i % categories.size], money(signed))
+                if ((i + 1) % 20 == 0) {
+                    totalRow(listOf("", "", "", "Subtotal", money(block)), background = PdfColor.White)
+                    block = 0
+                }
+            }
+            totalRow(listOf("", "", "", "Net total for year", money(running)), background = totalBg)
+        }
+    }
+
+    // =======================================================================================
+    // 9) Product catalogue — categorized tables interleaved with photo grids, SVG brand mark.
+    // =======================================================================================
+    fun productCatalog(photos: List<ByteArray>): PdfDocumentSpec = pdfDocument(PageConfig(margin = 40.dp, pageNumbers = true)) {
+        header {
+            row(gap = 12.dp) {
+                cell(1f) { vector(SVG_BADGE, height = 24.dp, fit = PhotoFit.Contain) }
+                cell(5f) { text("Northwind Traders — Product Catalogue", TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ink, align = TextAlign.End)) }
+            }
+            spacer(4.dp)
+            divider(hairline)
+        }
+        footer { text("Catalogue 2026 · prices in USD · subject to change", small.copy(align = TextAlign.Center)) }
+
+        text("Product Catalogue", h1)
+        text("Featured ranges with current pricing. Product images are illustrative.", small)
+        spacer(12.dp)
+
+        text("Featured this season", h2)
+        spacer(6.dp)
+        photoGrid(photos, perRow = 3, cellHeight = 110.dp, gap = 8.dp, fit = PhotoFit.Cover)
+        spacer(16.dp)
+
+        catalogCategory(
+            "Workstations",
+            listOf(
+                listOf("WS-1100", "Aurora Mini Desktop", "6-core / 16 GB / 512 GB", "In stock", money(89900)),
+                listOf("WS-1200", "Aurora Tower", "8-core / 32 GB / 1 TB", "In stock", money(139900)),
+                listOf("WS-1300", "Aurora Pro Tower", "12-core / 64 GB / 2 TB", "Low", money(219900)),
+                listOf("WS-1400", "Aurora Compact", "4-core / 8 GB / 256 GB", "In stock", money(59900)),
+                listOf("WS-1500", "Aurora Studio", "10-core / 32 GB / 1 TB", "In stock", money(179900)),
+                listOf("WS-1600", "Aurora Edge Node", "6-core / 16 GB / 512 GB", "Backorder", money(99900)),
+                listOf("WS-1700", "Aurora Render", "16-core / 128 GB / 4 TB", "Low", money(329900)),
+                listOf("WS-1800", "Aurora Thin Client", "2-core / 4 GB / 64 GB", "In stock", money(29900)),
+            ),
+        )
+        spacer(12.dp)
+        catalogCategory(
+            "Peripherals",
+            listOf(
+                listOf("PR-2100", "27\" 4K display panel", "IPS / 60 Hz / USB-C", "In stock", money(31900)),
+                listOf("PR-2200", "Wireless keyboard", "Low-profile / quiet", "In stock", money(4900)),
+                listOf("PR-2300", "Ergonomic mouse", "6-button / rechargeable", "In stock", money(3250)),
+                listOf("PR-2400", "USB-C docking station", "Dual 4K / 100 W PD", "Low", money(13900)),
+                listOf("PR-2500", "1080p webcam", "Auto-focus / dual mic", "In stock", money(6900)),
+                listOf("PR-2600", "Noise-cancelling headset", "USB / 3.5 mm", "In stock", money(8900)),
+                listOf("PR-2700", "Desk microphone", "Cardioid / USB", "Backorder", money(7900)),
+            ),
+        )
+        spacer(16.dp)
+        photoGrid(photos.takeLast(3) + photos.take(3), perRow = 3, cellHeight = 110.dp, gap = 8.dp, fit = PhotoFit.Cover)
+        spacer(16.dp)
+        catalogCategory(
+            "Networking",
+            listOf(
+                listOf("NW-3100", "8-port gigabit switch", "Unmanaged / fanless", "In stock", money(4500)),
+                listOf("NW-3200", "24-port managed switch", "L2+ / PoE", "Low", money(28900)),
+                listOf("NW-3300", "Wi-Fi 6 access point", "Dual-band / PoE", "In stock", money(15900)),
+                listOf("NW-3400", "Desktop router", "Wi-Fi 6 / 4 LAN", "In stock", money(11900)),
+                listOf("NW-3500", "Patch cable, 2 m (10 pk)", "Cat 6 / shielded", "In stock", money(2900)),
+                listOf("NW-3600", "Rack patch panel", "24-port / Cat 6", "Low", money(6900)),
+            ),
+        )
+        spacer(12.dp)
+        catalogCategory(
+            "Accessories",
+            listOf(
+                listOf("AC-4100", "Braided USB-C cable (2 m)", "100 W / 10 Gbps", "In stock", money(1190)),
+                listOf("AC-4200", "Laptop stand", "Aluminium / adjustable", "In stock", money(4200)),
+                listOf("AC-4300", "Surge protector (6-way)", "2 USB-A / 1 USB-C", "In stock", money(2600)),
+                listOf("AC-4400", "Cable management kit", "Trays + ties", "In stock", money(1800)),
+                listOf("AC-4500", "Monitor arm (single)", "VESA / gas spring", "Low", money(5400)),
+                listOf("AC-4600", "Privacy filter, 27\"", "Anti-glare", "In stock", money(3900)),
+            ),
+        )
+    }
+
+    private fun ContainerScope.catalogCategory(title: String, items: List<List<String>>) {
+        text(title, h2)
+        spacer(6.dp)
+        styledTable(
+            columns = listOf(
+                PdfColumn(1.4f, "SKU"),
+                PdfColumn(3.4f, "Product"),
+                PdfColumn(2.4f, "Specification"),
+                PdfColumn(1.3f, "Stock", TextAlign.Center),
+                PdfColumn(1.5f, "Price", TextAlign.End),
+            ),
+        ) { items.forEach { row(it) } }
+    }
+
+    // =======================================================================================
+    // 10) Service agreement — numbered sections of long wrapping paragraphs (paginate) + signatures.
+    // =======================================================================================
+    fun serviceAgreement(): PdfDocumentSpec = pdfDocument(PageConfig(margin = 50.dp, pageNumbers = true)) {
+        header {
+            text("Master Services Agreement", small.copy(color = muted))
+            spacer(4.dp)
+            divider(hairline)
+        }
+        footer { text("Contoso Ltd. & Northwind Traders — Confidential", small.copy(align = TextAlign.Center)) }
+
+        text("Master Services Agreement", h1)
+        text("Between Contoso Ltd. (\"Provider\") and Northwind Traders (\"Client\")", small)
+        spacer(4.dp)
+        text("Effective date: 1 July 2026", small)
+        spacer(8.dp)
+
+        val sections = listOf(
+            "Definitions", "Scope of Services", "Term and Renewal", "Fees and Payment",
+            "Service Levels", "Client Responsibilities", "Confidentiality", "Intellectual Property",
+            "Data Protection", "Warranties", "Limitation of Liability", "Indemnification",
+            "Termination", "Force Majeure", "Governing Law", "Entire Agreement",
+        )
+        sections.forEachIndexed { i, t -> section("${i + 1}. $t", lorem(if (i % 3 == 0) 3 else 2, i)) }
+
+        spacer(18.dp)
+        signatures()
+    }
+
+    private fun ContainerScope.section(title: String, paragraphs: List<String>) {
+        spacer(10.dp)
+        box {
+            text(title, h2)
+            spacer(4.dp)
+            paragraphs.forEach { p ->
+                text(p, body)
+                spacer(6.dp)
+            }
+        }
+    }
+
+    private fun ContainerScope.signatures() {
+        text("Signatures", h2)
+        spacer(24.dp)
+        row(gap = 30.dp) {
+            cell(1f) {
+                divider(ink)
+                spacer(3.dp)
+                text("For Contoso Ltd.", smallInk)
+                text("Name / title / date", small)
+            }
+            cell(1f) {
+                divider(ink)
+                spacer(3.dp)
+                text("For Northwind Traders", smallInk)
+                text("Name / title / date", small)
+            }
+        }
+    }
+
+    private val loremPool = listOf(
+        "The parties shall perform their respective obligations with reasonable skill and care, in line with the standards generally accepted in the industry and any written specifications agreed between them.",
+        "Each party retains ownership of its pre-existing materials; any deliverable created specifically for this engagement transfers to the Client upon full payment of the applicable fees.",
+        "Either party may terminate this agreement on thirty days' written notice, without prejudice to any rights or obligations accrued before the effective date of termination.",
+        "Neither party shall be liable for any indirect, incidental, or consequential loss, and each party's aggregate liability shall not exceed the fees paid in the preceding twelve months.",
+        "Confidential information disclosed under this agreement shall be used solely for its purposes and protected with the same degree of care a party applies to its own confidential information.",
+        "Invoices are payable within thirty days of receipt; amounts not disputed in good faith and left unpaid may accrue interest at the rate permitted by applicable law.",
+        "The Client shall provide timely access to the personnel, systems, and information reasonably required for the Provider to deliver the services described in the applicable statement of work.",
+        "This agreement constitutes the entire understanding between the parties and supersedes all prior discussions; any amendment must be made in writing and signed by an authorized representative of each party.",
+    )
+
+    private fun lorem(n: Int, seed: Int): List<String> = (0 until n).map { k ->
+        loremPool[(seed * 3 + k) % loremPool.size] + " " + loremPool[(seed * 5 + k + 1) % loremPool.size]
+    }
+
+    // =======================================================================================
+    // 11) Résumé / CV — weighted two-column layout, section headings, skills table.
+    // =======================================================================================
+    fun resume(): PdfDocumentSpec = pdfDocument(PageConfig(margin = 44.dp, pageNumbers = false)) {
+        text("Jordan A. Carter", TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, color = ink))
+        text("Senior Software Engineer", TextStyle(fontSize = 12.sp, color = accent))
+        spacer(6.dp)
+        divider(hairline)
+        spacer(14.dp)
+
+        row(gap = 26.dp) {
+            cell(1f) {
+                text("CONTACT", sidebarHead)
+                spacer(4.dp)
+                text("jordan.carter@example.com", smallInk)
+                text("+1 (555) 0100", smallInk)
+                text("Bayview, CA", smallInk)
+                text("github.com/example", smallInk)
+                spacer(14.dp)
+
+                text("SKILLS", sidebarHead)
+                spacer(4.dp)
+                styledTable(
+                    columns = listOf(PdfColumn(2f, "Skill"), PdfColumn(1f, "Level", TextAlign.End)),
+                ) {
+                    row("Kotlin", "Expert")
+                    row("Swift", "Advanced")
+                    row("TypeScript", "Advanced")
+                    row("PDF / graphics", "Advanced")
+                    row("CI / CD", "Proficient")
+                }
+                spacer(14.dp)
+
+                text("EDUCATION", sidebarHead)
+                spacer(4.dp)
+                text("B.Sc. Computer Science", smallInk.copy(fontWeight = FontWeight.Bold))
+                text("State University · 2014–2018", small)
+            }
+            cell(2f) {
+                text("SUMMARY", h2)
+                spacer(5.dp)
+                text(
+                    "Senior engineer with eight years building cross-platform applications and developer " +
+                        "tooling. Comfortable owning a feature end to end — from API design through UI polish " +
+                        "and release — with a track record of shipping reliable, well-tested software.",
+                    body,
+                )
+                spacer(12.dp)
+                text("EXPERIENCE", h2)
+                spacer(6.dp)
+                experienceItem(
+                    "Senior Software Engineer", "Contoso Ltd.", "2021 – present",
+                    listOf(
+                        "Led a small team building a multiplatform document-export pipeline.",
+                        "Cut export time by 60% by replacing a bitmap renderer with a vector engine.",
+                        "Mentored three junior engineers and ran the team's code-review practice.",
+                    ),
+                )
+                experienceItem(
+                    "Software Engineer", "Northwind Traders", "2018 – 2021",
+                    listOf(
+                        "Shipped the company's first mobile client across iOS and Android.",
+                        "Introduced automated UI testing, reducing release regressions markedly.",
+                    ),
+                )
+                experienceItem(
+                    "Junior Developer", "Fabrikam, Inc.", "2016 – 2018",
+                    listOf(
+                        "Maintained internal web tools and migrated legacy reports to a new stack.",
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun ContainerScope.experienceItem(role: String, company: String, period: String, bullets: List<String>) {
+        row {
+            cell(3f) { text(role, body.copy(fontWeight = FontWeight.Bold)) }
+            cell(1f) { text(period, small.copy(align = TextAlign.End)) }
+        }
+        text(company, smallInk.copy(color = accent))
+        spacer(3.dp)
+        bullets.forEach { text("•  $it", smallInk) }
+        spacer(9.dp)
+    }
+
+    // =======================================================================================
+    // 12) Event programme — header band + agenda schedule tables.
+    // =======================================================================================
+    fun eventProgram(): PdfDocumentSpec = pdfDocument(PageConfig(margin = 40.dp, pageNumbers = false)) {
+        header {
+            row {
+                cell(1f) { text("DevConf 2026", TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = accent)) }
+                cell(1f) { text("Conference Programme", small.copy(align = TextAlign.End)) }
+            }
+            spacer(4.dp)
+            divider(hairline)
+        }
+        footer { text("Riverside Convention Centre · #devconf26", small.copy(align = TextAlign.Center)) }
+
+        text("Conference Programme", h1)
+        text("Riverside Convention Centre · 14–15 October 2026", small)
+        spacer(14.dp)
+
+        text("Day 1 — Thursday", h2)
+        spacer(6.dp)
+        agendaTable(
+            listOf(
+                listOf("08:30", "Registration & coffee", "—", "Foyer"),
+                listOf("09:15", "Keynote: The next decade of tooling", "A. Johnson", "Hall A"),
+                listOf("10:30", "Designing resilient APIs", "S. Patel", "Room 1"),
+                listOf("11:30", "Multiplatform UI in practice", "M. Garcia", "Room 2"),
+                listOf("12:30", "Lunch", "—", "Foyer"),
+                listOf("13:45", "Rendering documents without a browser", "J. Carter", "Hall A"),
+                listOf("15:00", "Performance profiling workshop", "R. Brown", "Room 3"),
+                listOf("16:30", "Lightning talks", "Community", "Hall A"),
+                listOf("17:30", "Welcome reception", "—", "Terrace"),
+            ),
+        )
+        spacer(16.dp)
+        text("Day 2 — Friday", h2)
+        spacer(6.dp)
+        agendaTable(
+            listOf(
+                listOf("09:00", "Type systems for the rest of us", "C. Morgan", "Hall A"),
+                listOf("10:15", "Shipping accessible software", "D. Nguyen", "Room 1"),
+                listOf("11:15", "Scaling CI for big repos", "S. Patel", "Room 2"),
+                listOf("12:15", "Lunch", "—", "Foyer"),
+                listOf("13:30", "Panel: open source sustainability", "Panel", "Hall A"),
+                listOf("15:00", "Closing keynote", "A. Johnson", "Hall A"),
+                listOf("16:00", "Farewell", "—", "Foyer"),
+            ),
+        )
+    }
+
+    private fun ContainerScope.agendaTable(rows: List<List<String>>) {
+        styledTable(
+            columns = listOf(
+                PdfColumn(1.2f, "Time"),
+                PdfColumn(3.6f, "Session"),
+                PdfColumn(1.8f, "Speaker"),
+                PdfColumn(1.2f, "Room", TextAlign.Center),
+            ),
+        ) { rows.forEach { row(it) } }
+    }
+
     // ---- Helpers --------------------------------------------------------------------------
 
     /** Formats an integer amount of cents as a grouped currency string, e.g. `573206` → `$5,732.06`. */

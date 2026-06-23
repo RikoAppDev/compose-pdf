@@ -39,6 +39,14 @@ class GalleryExportTest {
         export("transaction-ledger", ExampleDocuments.transactionLedger(90), expectMin = 2, mustContain = listOf("Transaction Ledger", "Net total"), previewAllPages = false)
         export("photo-gallery", ExampleDocuments.photoGallery(photos), expectMin = 1, mustContain = listOf("Photo Gallery"))
 
+        // Complex / multi-page samples.
+        export("field-service-report", ExampleDocuments.fieldServiceReport(photos), expectMin = 2, mustContain = listOf("Facility Maintenance Report", "Tasks performed"))
+        export("annual-report", ExampleDocuments.annualReport(), expectMin = 3, mustContain = listOf("Annual Financial Report", "General ledger"))
+        export("product-catalog", ExampleDocuments.productCatalog(photos), expectMin = 2, mustContain = listOf("Product Catalogue", "Workstations"))
+        export("service-agreement", ExampleDocuments.serviceAgreement(), expectMin = 2, mustContain = listOf("Master Services Agreement", "Signatures"))
+        export("resume", ExampleDocuments.resume(), expectMin = 1, mustContain = listOf("Senior Software Engineer", "EXPERIENCE"))
+        export("event-program", ExampleDocuments.eventProgram(), expectMin = 1, mustContain = listOf("Conference Programme", "Day 1"))
+
         println("Gallery exported to: ${outDir.absolutePath}")
     }
 
@@ -53,7 +61,9 @@ class GalleryExportTest {
         val pdf = doc.render(regular(), bold())
         File(outDir, "$name.pdf").writeBytes(pdf)
 
+        var pageCount = 0
         Loader.loadPDF(pdf).use { d ->
+            pageCount = d.numberOfPages
             assertTrue(d.numberOfPages >= expectMin, "$name: expected >= $expectMin pages, got ${d.numberOfPages}")
             val text = PDFTextStripper().getText(d)
             mustContain.forEach { needle ->
@@ -66,7 +76,7 @@ class GalleryExportTest {
                 ImageIO.write(renderer.renderImageWithDPI(p, 110f), "png", File(outDir, "$name$suffix.png"))
             }
         }
-        println("  $name.pdf — ${pdf.size} bytes")
+        println("  $name.pdf — ${pdf.size} bytes, $pageCount pages")
     }
 
     /** Generates baseline JPEGs of varied aspect ratios so the photo gallery shows real image layout. */

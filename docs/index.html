@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>compose-pdf — pure-Kotlin KMP vector PDF</title>
+<meta name="description" content="A pure-Kotlin Kotlin Multiplatform library that generates vector PDFs with selectable text, small files, automatic pagination and a Compose-style DSL.">
+<style>
+  :root { --ink:#1b1f24; --muted:#6a737d; --line:#e6e8eb; --accent:#ff0707; --bg:#fafbfc; --card:#fff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  a { color:#0969da; text-decoration:none; } a:hover { text-decoration:underline; }
+  header.hero { max-width:980px; margin:0 auto; padding:64px 24px 24px; }
+  .hero h1 { font-size:44px; margin:0 0 8px; letter-spacing:-.02em; }
+  .hero .accent { color:var(--accent); }
+  .hero p.lead { font-size:19px; color:#3a4148; margin:0 0 20px; max-width:720px; }
+  .pills { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 6px; }
+  .pill { font-size:13px; background:#eef1f4; color:#3a4148; padding:5px 11px; border-radius:999px; }
+  .cta { display:flex; flex-wrap:wrap; gap:10px; margin:22px 0 4px; }
+  .btn { display:inline-block; padding:9px 16px; border-radius:8px; font-weight:600; font-size:14px; }
+  .btn.primary { background:var(--accent); color:#fff; } .btn.primary:hover { text-decoration:none; opacity:.92; }
+  .btn.ghost { border:1px solid var(--line); color:var(--ink); background:var(--card); } .btn.ghost:hover { text-decoration:none; border-color:#c7ccd1; }
+  code.coord { background:#eef1f4; padding:2px 7px; border-radius:6px; font-size:13px; }
+  main { max-width:980px; margin:0 auto; padding:24px; }
+  h2.section { font-size:22px; margin:36px 0 4px; }
+  p.note { color:var(--muted); font-size:14px; margin:0 0 22px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:22px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; transition:box-shadow .15s,transform .15s; }
+  .card:hover { box-shadow:0 8px 24px rgba(27,31,36,.10); transform:translateY(-2px); }
+  .card .thumb { background:#f1f3f5; border-bottom:1px solid var(--line); }
+  .card .thumb img { display:block; width:100%; height:auto; }
+  .card .body { padding:14px 16px 16px; display:flex; flex-direction:column; gap:8px; flex:1; }
+  .card h3 { margin:0; font-size:16px; }
+  .card .desc { color:#3a4148; font-size:13.5px; flex:1; margin:0; }
+  .card .meta { display:flex; align-items:center; gap:10px; font-size:13px; }
+  .card .pages { color:var(--muted); }
+  .card .links { display:flex; gap:14px; font-size:13px; font-weight:600; margin-left:auto; }
+  footer { max-width:980px; margin:0 auto; padding:32px 24px 64px; color:var(--muted); font-size:13.5px; border-top:1px solid var(--line); margin-top:48px; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <h1><span class="accent">compose-pdf</span></h1>
+  <p class="lead">A <strong>pure-Kotlin Kotlin Multiplatform</strong> library that generates <strong>vector</strong> PDFs —
+  identical across devices, with <strong>selectable/searchable</strong> text, small files, automatic <strong>pagination</strong>,
+  and a <strong>Compose-style DSL</strong>. No platform text engine, no bundled font.</p>
+  <p>Coordinates: <code class="coord">io.github.rikoappdev:compose-pdf</code> · Targets <strong>Android · iOS · JVM</strong> · Apache-2.0</p>
+  <div class="pills">
+    <span class="pill">Type0 / Identity-H · selectable text</span>
+    <span class="pill">Automatic pagination</span>
+    <span class="pill">Tables · boxes · rows</span>
+    <span class="pill">JPEG + PNG images</span>
+    <span class="pill">SVG + VectorDrawable import</span>
+    <span class="pill">Deterministic output</span>
+  </div>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/RikoAppDev/compose-pdf">GitHub repo</a>
+    <a class="btn ghost" href="https://central.sonatype.com/artifact/io.github.rikoappdev/compose-pdf">Maven Central</a>
+    <a class="btn ghost" href="https://github.com/RikoAppDev/compose-pdf#readme">Docs</a>
+  </div>
+</header>
+
+<main>
+  <h2 class="section">Gallery</h2>
+  <p class="note">Real PDFs rendered by the engine from the example builders in
+    <a href="https://github.com/RikoAppDev/compose-pdf/blob/main/composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt">ExampleDocuments.kt</a>.
+    Every card links its <strong>source code → the exported PDF</strong> (the preview opens the PDF).
+    All data is invented, generic placeholder content (Contoso / Northwind / Fabrikam).</p>
+  <div class="grid" id="grid"></div>
+</main>
+
+<footer>
+  Generated from the compose-pdf sample gallery. Two samples embed a logo via <code class="coord">vector()</code>
+  — the field-service report uses an Android VectorDrawable, the catalogue an SVG.
+</footer>
+
+<script>
+  const REPO = "https://github.com/RikoAppDev/compose-pdf/blob/main";
+  const RAW  = "https://raw.githubusercontent.com/RikoAppDev/compose-pdf/main";
+  const CODE = REPO + "/composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt";
+  const samples = [
+    ["Field service report","field-service-report",453,5,"Repeating header (VectorDrawable badge) + footer + page numbers, bordered record cards with 3-column summaries, photo grid and signatures."],
+    ["Annual report","annual-report",598,5,"Title + metric cards, a 120-row ledger with a repeating header, zebra striping, periodic subtotals and a grand total."],
+    ["Product catalogue","product-catalog",667,3,"SVG brand mark in the header, categorized tables interleaved with photo grids."],
+    ["Service agreement","service-agreement",758,6,"16 numbered sections of long wrapped paragraphs (keep-together) and a signatures block."],
+    ["Invoice","invoice",78,1,"Weighted header columns, a line-item table and stacked totals."],
+    ["Business letter","business-letter",155,1,"Letterhead and automatically wrapped body paragraphs."],
+    ["Price list","price-list",205,2,"Repeating header band and multiple categorized tables."],
+    ["Status report","status-report",268,1,"Summary box, metric cards and a milestones table."],
+    ["Transaction ledger","transaction-ledger",344,3,"90 rows over three pages, auto-paginated with a repeating table header and page numbers."],
+    ["Photo gallery","photo-gallery",391,1,"Mixed aspect ratios laid out with PhotoFit.Smart / Contain."],
+    ["Résumé","resume",833,1,"Weighted two-column CV, section headings and a skills table."],
+    ["Event program","event-program",919,1,"Header band and agenda schedule tables."],
+  ];
+  document.getElementById("grid").innerHTML = samples.map(([name,file,line,pages,desc]) => `
+    <article class="card">
+      <a class="thumb" href="${REPO}/samples/${file}.pdf"><img loading="lazy" src="${RAW}/samples/${file}.png" alt="${name} preview"></a>
+      <div class="body">
+        <h3>${name}</h3>
+        <p class="desc">${desc}</p>
+        <div class="meta">
+          <span class="pages">${pages} page${pages>1?"s":""}</span>
+          <span class="links">
+            <a href="${CODE}#L${line}">code</a>
+            <a href="${REPO}/samples/${file}.pdf">PDF</a>
+          </span>
+        </div>
+      </div>
+    </article>`).join("");
+</script>
+</body>
+</html>
