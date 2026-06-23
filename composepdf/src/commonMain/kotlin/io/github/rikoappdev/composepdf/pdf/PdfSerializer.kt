@@ -8,7 +8,9 @@ import io.github.rikoappdev.composepdf.render.ImageOp
 import io.github.rikoappdev.composepdf.render.Page
 import io.github.rikoappdev.composepdf.render.RectOp
 import io.github.rikoappdev.composepdf.render.TextOp
+import io.github.rikoappdev.composepdf.render.VectorOp
 import io.github.rikoappdev.composepdf.util.ByteBuf
+import io.github.rikoappdev.composepdf.util.fmtNum
 import io.github.rikoappdev.composepdf.util.toHex4
 import kotlin.math.roundToInt
 
@@ -36,6 +38,19 @@ internal class PngImageData(
     override val height: Int,
     val rgb: ByteArray,
     val alpha: ByteArray?,
+) : EmbeddedImage
+
+/**
+ * A vector image (imported VectorDrawable/SVG) compiled to a Form XObject: a content stream of PDF
+ * path operators plus its own resource dictionary. [width]/[height] are the viewport (= the form's
+ * BBox and the intrinsic size used for aspect-fit). The content is FlateDecode-compressed like other
+ * streams. Drawn with `Do`, scaled by the place matrix — defined once, reused on every page.
+ */
+internal class VectorForm(
+    override val width: Int,
+    override val height: Int,
+    val content: ByteArray,
+    val resources: String,
 ) : EmbeddedImage
 
 /**
@@ -94,6 +109,16 @@ internal fun serializePdf(
                         "/Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} " +
                             "/ColorSpace /DeviceRGB /BitsPerComponent 8$smaskRef",
                         img.rgb,
+                        compress = true,
+                    )
+                )
+            }
+            is VectorForm -> {
+                doc.add(
+                    streamObject(
+                        "/Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 ${img.width} ${img.height}] " +
+                            "/Matrix [1 0 0 1 0 0] /Resources ${img.resources}",
+                        img.content,
                         compress = true,
                     )
                 )
@@ -170,6 +195,32 @@ private fun buildContent(
                 b.ascii("q\n${op.xPt} $boxYPdf ${op.wPt} ${op.hPt} re W n\n$dw 0 0 $dh $ox $oy cm\n/$name Do\nQ\n")
             } else {
                 b.ascii("q\n$dw 0 0 $dh $ox $oy cm\n/$name Do\nQ\n")
+            }
+        }
+        is VectorOp -> {
+            val name = imgRes[op.imageIndex].first
+            val boxYPdf = h - (op.yPt + op.hPt)
+            val vw = if (op.intrinsicW > 0) op.intrinsicW else op.wPt
+            val vh = if (op.intrinsicH > 0) op.intrinsicH else op.hPt
+            val coverS = maxOf(op.wPt.toDouble() / vw, op.hPt.toDouble() / vh)
+            val containS = minOf(op.wPt.toDouble() / vw, op.hPt.toDouble() / vh)
+            val useCover = when (op.fit) {
+                PhotoFit.Cover -> true
+                PhotoFit.Contain -> false
+                PhotoFit.Smart -> minOf(vw * containS / op.wPt, vh * containS / op.hPt) < 0.25
+            }
+            val s = if (useCover) coverS else containS
+            val dw = vw * s
+            val dh = vh * s
+            val ox = op.xPt + (op.wPt - dw) / 2
+            val oy = boxYPdf + (op.hPt - dh) / 2
+            // The form lives in its own BBox [0 0 vw vh]; scale by dw/vw, dh/vh to the target box.
+            val sx = dw / vw
+            val sy = dh / vh
+            if (useCover) {
+                b.ascii("q\n${op.xPt} $boxYPdf ${op.wPt} ${op.hPt} re W n\n${fmtNum(sx)} 0 0 ${fmtNum(sy)} ${fmtNum(ox)} ${fmtNum(oy)} cm\n/$name Do\nQ\n")
+            } else {
+                b.ascii("q\n${fmtNum(sx)} 0 0 ${fmtNum(sy)} ${fmtNum(ox)} ${fmtNum(oy)} cm\n/$name Do\nQ\n")
             }
         }
     }

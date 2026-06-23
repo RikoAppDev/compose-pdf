@@ -18,6 +18,7 @@ import io.github.rikoappdev.composepdf.layout.TableColumn
 import io.github.rikoappdev.composepdf.layout.TableNode
 import io.github.rikoappdev.composepdf.layout.TableRow
 import io.github.rikoappdev.composepdf.layout.TextNode
+import io.github.rikoappdev.composepdf.layout.VectorNode
 import io.github.rikoappdev.composepdf.layout.drawTableRow
 import io.github.rikoappdev.composepdf.layout.measure
 import io.github.rikoappdev.composepdf.layout.tableColumnWidths
@@ -25,11 +26,14 @@ import io.github.rikoappdev.composepdf.layout.tableRowHeight
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
 import io.github.rikoappdev.composepdf.pdf.JpegImage
 import io.github.rikoappdev.composepdf.pdf.PngImageData
+import io.github.rikoappdev.composepdf.pdf.buildVectorForm
 import io.github.rikoappdev.composepdf.pdf.serializePdf
 import io.github.rikoappdev.composepdf.render.Page
 import io.github.rikoappdev.composepdf.render.RectOp
 import io.github.rikoappdev.composepdf.render.TextOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
+import io.github.rikoappdev.composepdf.vector.isVectorXml
+import io.github.rikoappdev.composepdf.vector.parseVector
 
 enum class PageSize(val widthPt: Int, val heightPt: Int) {
     A4(595, 842),
@@ -135,6 +139,23 @@ open class ContainerScope internal constructor(internal val images: MutableList<
             else -> throw IllegalArgumentException("Unsupported image format (expected JPEG or PNG)")
         }
         nodes.add(ImageNode(index, width.value, height.value, iw, ih, fit))
+    }
+
+    /**
+     * Embeds a **vector** image — an Android VectorDrawable or an SVG (auto-detected from the XML
+     * root) — as native PDF vector paths (crisp at any zoom, resolution-independent), compiled once
+     * into a Form XObject. [width] = 0.dp fills the available width; [fit] controls how the vector's
+     * viewport maps into the [width] × [height] box (default [PhotoFit.Contain] preserves aspect).
+     * Supports paths (full M/L/H/V/C/S/Q/T/A/Z command set), basic SVG shapes, group transforms,
+     * solid fills/strokes (nonzero & even-odd) and per-element opacity. Gradients, patterns, text and
+     * filters are not supported. Throws if the bytes aren't a recognizable VectorDrawable/SVG.
+     */
+    fun vector(vectorBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Contain) {
+        require(isVectorXml(vectorBytes)) { "Not a vector image (expected VectorDrawable or SVG XML)" }
+        val form = buildVectorForm(parseVector(vectorBytes))
+        val index = images.size
+        images.add(form)
+        nodes.add(VectorNode(index, width.value, height.value, form.width, form.height, fit))
     }
 
     /**
@@ -434,15 +455,21 @@ private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig
             ctx.closeBox(frame)
         }
         is TableNode -> flowTable(node, x, availW, ctx, cfg)
-        is RowNode, is ImageNode -> {
+        is RowNode, is ImageNode, is VectorNode -> {
             // Atomic — never split; move whole to the next page if it doesn't fit.
             val usableH = ctx.usableBottom - ctx.topY
-            if (node is ImageNode && node.heightPt > usableH) {
-                // An image taller than a whole page can never fit; clamp it to the usable height so
-                // it doesn't draw past the page bottom into the footer. Valid documents use image
-                // heights far smaller than a page, so this never triggers for them.
+            // An image/vector taller than a whole page can never fit; clamp it to the usable height
+            // so it doesn't draw past the page bottom into the footer. Valid documents use heights
+            // far smaller than a page, so this never triggers for them.
+            val clamped: Node? = when {
+                node is ImageNode && node.heightPt > usableH ->
+                    ImageNode(node.imageIndex, node.widthPt, usableH, node.intrinsicW, node.intrinsicH, node.fit)
+                node is VectorNode && node.heightPt > usableH ->
+                    VectorNode(node.vectorIndex, node.widthPt, usableH, node.viewportW, node.viewportH, node.fit)
+                else -> null
+            }
+            if (clamped != null) {
                 if (ctx.y > ctx.topY) ctx.newPage()
-                val clamped = ImageNode(node.imageIndex, node.widthPt, usableH, node.intrinsicW, node.intrinsicH, node.fit)
                 val p = measure(clamped, availW, ctx.book)
                 p.place(x, ctx.y, ctx.page.ops)
                 ctx.y += p.heightPt

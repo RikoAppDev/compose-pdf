@@ -64,6 +64,38 @@ internal fun Int.toHex4(): String {
     }
 }
 
+/**
+ * Deterministic, locale-independent decimal formatter for vector path coordinates and colors.
+ * Fixed rounding (half-to-even via [kotlin.math.round]) → identical output on every platform; do
+ * NOT use `Double.toString()` / platform formatting, which varies by platform and locale.
+ */
+internal fun fmtNum(value: Double, decimals: Int = 3): String {
+    if (value.isNaN() || value.isInfinite()) return "0"
+    var scale = 1L
+    repeat(decimals) { scale *= 10 }
+    val neg = value < 0.0
+    val mag = kotlin.math.abs(value)
+    // Guard against Long overflow when scaling: such coordinates are far outside any real
+    // page/viewport (and get clipped anyway). Fall back to the rounded integer, never a saturated
+    // Long that would print as a garbage number.
+    if (mag * scale >= 9.0e18) {
+        if (mag >= 9.0e18) return "0"
+        val i = kotlin.math.round(mag).toLong()
+        return if (neg && i != 0L) "-$i" else "$i"
+    }
+    val scaled = kotlin.math.round(mag * scale).toLong()
+    val intPart = scaled / scale
+    val frac = scaled % scale
+    val sb = StringBuilder()
+    if (neg && (intPart != 0L || frac != 0L)) sb.append('-')
+    sb.append(intPart)
+    if (frac > 0L) {
+        val fracStr = frac.toString().padStart(decimals, '0').trimEnd('0')
+        if (fracStr.isNotEmpty()) sb.append('.').append(fracStr)
+    }
+    return sb.toString()
+}
+
 /** Iterates Unicode code points of a string, combining surrogate pairs.
  *  Named `toCodePoints` to avoid colliding with Java's `CharSequence.codePoints()` on JVM. */
 internal fun String.toCodePoints(): List<Int> {

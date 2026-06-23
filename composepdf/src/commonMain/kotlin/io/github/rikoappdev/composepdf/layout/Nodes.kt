@@ -18,6 +18,14 @@ internal class ImageNode(
     val intrinsicH: Int,
     val fit: PhotoFit,
 ) : Node
+internal class VectorNode(
+    val vectorIndex: Int,
+    val widthPt: Int,   // 0 = fill available width
+    val heightPt: Int,
+    val viewportW: Int,
+    val viewportH: Int,
+    val fit: PhotoFit,
+) : Node
 internal class ColumnNode(val children: List<Node>, val gapPt: Int) : Node
 internal class RowChild(val node: Node, val weight: Float)
 internal class RowNode(val children: List<RowChild>, val gapPt: Int) : Node

@@ -6,6 +6,7 @@ import io.github.rikoappdev.composepdf.render.DrawOp
 import io.github.rikoappdev.composepdf.render.ImageOp
 import io.github.rikoappdev.composepdf.render.RectOp
 import io.github.rikoappdev.composepdf.render.TextOp
+import io.github.rikoappdev.composepdf.render.VectorOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
 
 /** A measured node: its size + a placer that emits absolute draw ops at a given top-left (x,y). */
@@ -31,6 +32,13 @@ internal fun measure(node: Node, availWidthPt: Int, book: TextMetrics): Placeabl
         val w = if (node.widthPt in 1..availWidthPt) node.widthPt else availWidthPt
         Placeable(w, node.heightPt) { x, y, out ->
             out.add(ImageOp(x, y, w, node.heightPt, node.imageIndex, node.intrinsicW, node.intrinsicH, node.fit))
+        }
+    }
+
+    is VectorNode -> {
+        val w = if (node.widthPt in 1..availWidthPt) node.widthPt else availWidthPt
+        Placeable(w, node.heightPt) { x, y, out ->
+            out.add(VectorOp(x, y, w, node.heightPt, node.vectorIndex, node.viewportW, node.viewportH, node.fit))
         }
     }
 
