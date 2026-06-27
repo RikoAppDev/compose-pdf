@@ -6,7 +6,6 @@ import io.github.rikoappdev.composepdf.TextStyle
 import io.github.rikoappdev.composepdf.font.TextMetrics
 import io.github.rikoappdev.composepdf.render.DrawOp
 import io.github.rikoappdev.composepdf.render.RectOp
-import io.github.rikoappdev.composepdf.render.TextOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
 
 internal class TableColumn(val weight: Float, val header: String, val align: TextAlign)
@@ -77,14 +76,13 @@ internal fun drawTableRow(
         var ly = yTop + padVPt
         for (line in lines) {
             if (line.isNotEmpty()) {
-                val gids = book.shape(line, style.fontWeight)
-                val lw = book.widthOfPt(gids, style.fontWeight, fs)
+                val lw = book.measureWidthPt(line, style.fontWeight, fs)
                 val lx = when (aligns[i]) {
                     TextAlign.Start -> innerX
                     TextAlign.Center -> innerX + (innerW - lw) / 2
                     TextAlign.End -> innerX + (innerW - lw)
                 }
-                out.add(TextOp(lx, ly + ascent, gids, style.fontWeight, fs, style.color))
+                book.placeLine(line, style.fontWeight, fs, style.color, lx, ly + ascent, out)
             }
             ly += lineH
         }
