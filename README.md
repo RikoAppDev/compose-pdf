@@ -134,6 +134,8 @@ val pdf = document.render(regular, bold, emoji)
 - Single–code-point emoji are supported. ZWJ sequences (👨‍👩‍👧) and skin-tone modifiers render their
   base emoji (the joiner/modifier is dropped) since the engine does no GSUB shaping yet.
 - Omitting the argument keeps output byte-for-byte identical to before — the feature is opt-in.
+- The on-screen [`@Preview` bridge](#live-preview-design-time-preview) renders emoji code points as
+  text (`.notdef`), not color bitmaps — the color emoji live in the exported PDF only.
 
 ## Building & testing
 
