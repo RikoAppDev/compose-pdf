@@ -1,3 +1,6 @@
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.publish.maven.tasks.AbstractPublishToMaven
+import org.gradle.plugins.signing.Sign
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -5,6 +8,8 @@ plugins {
     alias(libs.plugins.androidMultiplatformLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
+    `maven-publish`
+    signing
 }
 
 group = providers.gradleProperty("GROUP").get()
@@ -47,4 +52,69 @@ kotlin {
             }
         }
     }
+}
+
+// ----------------------------------------------------------------------------------------------
+// Publishing — mirrors :composepdf (plain maven-publish + signing). The preview artifact ships as
+// `compose-pdf-preview` (+ per-target variants). Signed artifacts stage into the SAME local Maven
+// layout as :composepdf (`composepdf/build/staging-deploy`), so the existing release workflow zips
+// and uploads both modules' artifacts in one Central Portal bundle with no workflow change.
+// ----------------------------------------------------------------------------------------------
+
+val javadocJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+}
+
+publishing {
+    publications.withType<MavenPublication>().configureEach {
+        artifact(javadocJar)
+        artifactId = if (name == "kotlinMultiplatform") "compose-pdf-preview" else "compose-pdf-preview-$name"
+        pom {
+            name.set("compose-pdf-preview")
+            description.set("Design-time @Preview bridge for compose-pdf: render a pdfDocument spec live on a Compose Canvas.")
+            url.set(providers.gradleProperty("POM_URL"))
+            licenses {
+                license {
+                    name.set(providers.gradleProperty("POM_LICENSE_NAME"))
+                    url.set(providers.gradleProperty("POM_LICENSE_URL"))
+                }
+            }
+            developers {
+                developer {
+                    id.set(providers.gradleProperty("POM_DEVELOPER_ID"))
+                    name.set(providers.gradleProperty("POM_DEVELOPER_NAME"))
+                    url.set(providers.gradleProperty("POM_DEVELOPER_URL"))
+                }
+            }
+            scm {
+                url.set(providers.gradleProperty("POM_SCM_URL"))
+                connection.set(providers.gradleProperty("POM_SCM_CONNECTION"))
+                developerConnection.set(providers.gradleProperty("POM_SCM_DEV_CONNECTION"))
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = "MavenCentral"
+            url = rootProject.layout.projectDirectory.dir("composepdf/build/staging-deploy").asFile.toURI()
+        }
+    }
+}
+
+signing {
+    val signingKeyId = findProperty("signingKeyId") as String? ?: System.getenv("SIGNING_KEY_ID")
+    val signingKey = findProperty("signingKey") as String? ?: System.getenv("SIGNING_KEY")
+    val signingPassword = findProperty("signingPassword") as String? ?: System.getenv("SIGNING_PASSWORD")
+    if (signingKeyId != null && signingKey != null && signingPassword != null) {
+        useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
+        sign(publishing.publications)
+    }
+}
+
+// Only require signing for Maven Central publication tasks (keeps local builds key-free).
+gradle.taskGraph.whenReady {
+    signing.isRequired = allTasks.any { it.name.contains("MavenCentral") }
+}
+tasks.withType<AbstractPublishToMaven>().configureEach {
+    dependsOn(tasks.withType<Sign>())
 }

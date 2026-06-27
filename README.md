@@ -130,7 +130,6 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 
 ## Roadmap
 
-- Live `@Composable` preview bridge — draw the engine's computed glyph/box positions onto a Compose `Canvas` for an on-screen preview (the PDF stays the source of truth).
 - GPOS kerning / ligatures (v1 uses advance-width shaping).
 - More image formats (JPEG + PNG today; WebP/others later).
 - Complex scripts / RTL / bidi.

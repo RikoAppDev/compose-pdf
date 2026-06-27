@@ -23,10 +23,11 @@ jobs:
 
       # commonMain metadata compile = proof the engine is shared (no java.* leak → iOS-identical).
       # jvmTest = the identity gate (PDFBox text extraction + size + composite-glyph checks).
+      # :composepdf-preview:jvmTest = the @Preview bridge renders headlessly (Compose Desktop screenshot).
       - name: Verify shared engine + run identity gate
         run: |
           chmod +x ./gradlew
-          ./gradlew :composepdf:compileCommonMainKotlinMetadata :composepdf:jvmTest --no-configuration-cache
+          ./gradlew :composepdf:compileCommonMainKotlinMetadata :composepdf:jvmTest :composepdf-preview:jvmTest --no-configuration-cache
 
       - name: Upload test report
         if: always()
