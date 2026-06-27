@@ -5,7 +5,6 @@ import io.github.rikoappdev.composepdf.font.TextMetrics
 import io.github.rikoappdev.composepdf.render.DrawOp
 import io.github.rikoappdev.composepdf.render.ImageOp
 import io.github.rikoappdev.composepdf.render.RectOp
-import io.github.rikoappdev.composepdf.render.TextOp
 import io.github.rikoappdev.composepdf.render.VectorOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
 
@@ -52,14 +51,13 @@ internal fun measure(node: Node, availWidthPt: Int, book: TextMetrics): Placeabl
             var ly = y
             for (line in lines) {
                 if (line.isNotEmpty()) {
-                    val gids = book.shape(line, weight)
-                    val lw = book.widthOfPt(gids, weight, fs)
+                    val lw = book.measureWidthPt(line, weight, fs)
                     val lx = when (node.style.align) {
                         TextAlign.Start -> x
                         TextAlign.Center -> x + (availWidthPt - lw) / 2
                         TextAlign.End -> x + (availWidthPt - lw)
                     }
-                    out.add(TextOp(lx, ly + ascent, gids, weight, fs, node.style.color))
+                    book.placeLine(line, weight, fs, node.style.color, lx, ly + ascent, out)
                 }
                 ly += lineH
             }

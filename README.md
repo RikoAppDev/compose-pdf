@@ -29,7 +29,8 @@ to users.
 - **Header / footer / page numbers**: repeating `header`/`footer` bands and an auto page-number line whose space is reserved (content never overlaps it). `PageConfig` controls it all — `repeatHeader` (every page vs. first page only, like a title block), `pageNumberFormat`, `pageNumberStyle`, `pageNumbers`.
 - Familiar value types: `TextStyle` (with `copy`), `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight`, `TextAlign`.
 - **Automatic pagination**: paragraphs split by line; tables split by row (repeating the header); bordered **boxes and columns split across pages** with the border/background redrawn per fragment; rows and images stay atomic (never cut). Optional keep-together moves a block whole instead of leaving a sliver.
-- **Progress reporting**: `render(regular, bold, onProgress)` calls the optional `onProgress: (Float) -> Unit` with `0f`→`1f` as pages are laid out and serialized — drive a real determinate progress bar. Omit it and output is byte-for-byte unchanged.
+- **Color emoji**: pass an optional emoji font (`render(regular, bold, emoji)`) and emoji render as inline color bitmaps from `sbix` / `CBLC`+`CBDT` faces (the "phone" look) — see [Color emoji](#color-emoji). Opt-in; omit it and output is unchanged.
+- **Progress reporting**: `render(regular, bold, onProgress = { … })` calls the optional `onProgress: (Float) -> Unit` with `0f`→`1f` as pages are laid out and serialized — drive a real determinate progress bar. Omit it and output is byte-for-byte unchanged.
 - **FlateDecode compression**: content streams, the subset font program and the ToUnicode CMap are deflated by a pure-Kotlin encoder (deterministic on every platform).
 - Regular + Bold faces (bundled).
 
@@ -116,6 +117,24 @@ val pdf = document.render(regular, bold)
 Any TrueType font works. For Latin diacritics (e.g. Czech/Slovak/Polish) pick a face that covers
 Latin Extended-A/B, such as Noto Sans or DejaVu Sans.
 
+### Color emoji
+
+Pass an optional **color-emoji font** as a third argument and code points your text faces can't
+render are drawn inline as real color bitmaps (the "phone" emoji look) instead of `.notdef` boxes:
+
+```kotlin
+val emoji: ByteArray = loadFont("NotoColorEmoji.ttf")   // an sbix or CBDT/CBLC color font
+val pdf = document.render(regular, bold, emoji)
+```
+
+- Supported font formats: Apple **`sbix`** (Apple Color Emoji) and Google **`CBLC`/`CBDT`** (the
+  classic large `NotoColorEmoji.ttf`) — each glyph carries a PNG, embedded as a normal image XObject.
+- **Not** used: color **vector** fonts (`COLR`/`CPAL`, e.g. Segoe UI Emoji and Noto's newer COLRv1
+  build) — they need an outline rasterizer; such code points fall back to the text `.notdef`.
+- Single–code-point emoji are supported. ZWJ sequences (👨‍👩‍👧) and skin-tone modifiers render their
+  base emoji (the joiner/modifier is dropped) since the engine does no GSUB shaping yet.
+- Omitting the argument keeps output byte-for-byte identical to before — the feature is opt-in.
+
 ## Building & testing
 
 ```
@@ -133,5 +152,5 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 - GPOS kerning / ligatures (v1 uses advance-width shaping).
 - More image formats (JPEG + PNG today; WebP/others later).
 - Complex scripts / RTL / bidi.
-- Emoji & color fonts — the engine subsets a single monochrome outline (`glyf`) TrueType face, so emoji and color-glyph fonts (COLR/CPAL, CBDT, sbix) are **not rendered yet** (codepoints with no outline in the supplied face fall back to a missing glyph); needs color-glyph support or an emoji fallback face.
+- Color **vector** emoji (`COLR`/`CPAL`) and ZWJ/skin-tone sequences — today bitmap emoji (`sbix`, `CBDT`) render, single code point at a time (see [Color emoji](#color-emoji)).
 - Long-word breaking inside narrow columns.

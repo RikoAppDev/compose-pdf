@@ -30,7 +30,6 @@ import io.github.rikoappdev.composepdf.pdf.buildVectorForm
 import io.github.rikoappdev.composepdf.pdf.serializePdf
 import io.github.rikoappdev.composepdf.render.Page
 import io.github.rikoappdev.composepdf.render.RectOp
-import io.github.rikoappdev.composepdf.render.TextOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
 import io.github.rikoappdev.composepdf.vector.isVectorXml
 import io.github.rikoappdev.composepdf.vector.parseVector
@@ -278,6 +277,13 @@ class PdfDocumentSpec internal constructor(
      * (the app reads its own bundled `.ttf` via its resource mechanism). Only the glyphs a document
      * uses are subset and embedded.
      *
+     * [emojiFontBytes], when supplied, is an Apple `sbix` or Noto `CBLC`/`CBDT` **color-emoji** font:
+     * code points the Regular/Bold faces can't render but the emoji face can are drawn inline as color
+     * bitmap images (the "phone" emoji look) instead of `.notdef` boxes. Single–code-point emoji are
+     * supported; ZWJ sequences and skin-tone modifiers render their base emoji (the joiner/modifier is
+     * dropped), and color **vector** fonts (`COLR`/`CPAL`, e.g. Segoe UI Emoji) are not used. Passing
+     * `null` keeps output byte-for-byte identical to the no-emoji path.
+     *
      * [onProgress], when supplied, is invoked with a monotonically increasing fraction in `0f..1f`:
      * `0f` once pagination is done (the total page count is known), then `(page + 1) / total` (scaled
      * to leave a small tail) as each page's content is serialized, and exactly `1f` once the final
@@ -287,12 +293,16 @@ class PdfDocumentSpec internal constructor(
     fun render(
         regularFontBytes: ByteArray,
         boldFontBytes: ByteArray,
+        emojiFontBytes: ByteArray? = null,
         onProgress: ((Float) -> Unit)? = null,
     ): ByteArray {
-        val book = FontBook(regularFontBytes, boldFontBytes)
+        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, baseImageIndex = images.size)
         val pages = layout(this, book)
         onProgress?.invoke(0f)
-        return serializePdf(pages, book, images, onProgress)
+        // Emoji bitmaps discovered during layout are appended after the document's own images, so the
+        // global indices the layout emitted (baseImageIndex + local) line up with this combined list.
+        val allImages = if (book.emojiImages.isEmpty()) images else images + book.emojiImages
+        return serializePdf(pages, book, allImages, onProgress)
     }
 }
 
@@ -497,14 +507,13 @@ private fun flowText(node: TextNode, x: Int, availW: Int, ctx: Flow, cfg: PageCo
     for (line in lines) {
         if (ctx.y + lineH > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
         if (line.isNotEmpty()) {
-            val gids = ctx.book.shape(line, weight)
-            val lw = ctx.book.widthOfPt(gids, weight, fs)
+            val lw = ctx.book.measureWidthPt(line, weight, fs)
             val lx = when (node.style.align) {
                 TextAlign.Start -> x
                 TextAlign.Center -> x + (availW - lw) / 2
                 TextAlign.End -> x + (availW - lw)
             }
-            ctx.page.ops.add(TextOp(lx, ctx.y + ascent, gids, weight, fs, node.style.color))
+            ctx.book.placeLine(line, weight, fs, node.style.color, lx, ctx.y + ascent, ctx.page.ops)
         }
         ctx.y += lineH
     }
@@ -540,14 +549,14 @@ private fun addPageNumbers(pages: List<Page>, book: TextMetrics, cfg: PageConfig
     val ascent = book.ascentPt(weight, fs)
     val total = pages.size
     for ((i, p) in pages.withIndex()) {
-        val gids = book.shape(cfg.pageNumberFormat(i + 1, total), weight)
-        val tw = book.widthOfPt(gids, weight, fs)
+        val label = cfg.pageNumberFormat(i + 1, total)
+        val tw = book.measureWidthPt(label, weight, fs)
         val contentW = p.widthPt - 2 * m
         val x = when (style.align) {
             TextAlign.Start -> m
             TextAlign.Center -> m + (contentW - tw) / 2
             TextAlign.End -> m + (contentW - tw)
         }
-        p.ops.add(TextOp(x, topYForNumber + ascent, gids, weight, fs, style.color))
+        book.placeLine(label, weight, fs, style.color, x, topYForNumber + ascent, p.ops)
     }
 }

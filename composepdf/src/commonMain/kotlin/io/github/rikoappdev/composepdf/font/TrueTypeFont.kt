@@ -24,10 +24,15 @@ internal class TrueTypeFont(val data: ByteArray) {
 
     private val hmtxOffset: Int
     private val glyfOffset: Int
-    /** loca[i]..loca[i+1) is the byte range of glyph i inside the glyf table (absolute offsets). */
+    /** loca[i]..loca[i+1) is the byte range of glyph i inside the glyf table (absolute offsets).
+     *  Empty for color-bitmap fonts that ship no outlines (Apple/Noto emoji): they are addressed
+     *  through the color-bitmap table, never the outline subsetter. */
     private val loca: IntArray
 
     private val cmap: CmapLookup?
+
+    /** Color-bitmap strikes (sbix / CBLC+CBDT), present only for color-emoji faces. */
+    private val color: ColorBitmaps?
 
     private class TableRec(val offset: Int, val length: Int)
 
@@ -61,21 +66,44 @@ internal class TrueTypeFont(val data: ByteArray) {
         numGlyphs = r.u16At(maxp.offset + 4)
 
         hmtxOffset = req("hmtx").offset
-        glyfOffset = req("glyf").offset
 
-        // loca: numGlyphs+1 offsets, short (×2) or long format.
-        val locaRec = req("loca")
-        loca = IntArray(numGlyphs + 1)
-        if (indexToLocFormat == 0) {
-            for (i in 0..numGlyphs) loca[i] = glyfOffset + r.u16At(locaRec.offset + i * 2) * 2
+        // glyf/loca are required for outline subsetting (the text faces) but legitimately ABSENT from
+        // color-bitmap emoji fonts (Apple/Noto), which carry no outlines. Tolerate their absence; the
+        // subsetter is only ever run on the text faces, which always have them.
+        val glyfRec = tables["glyf"]
+        val locaRec = tables["loca"]
+        if (glyfRec != null && locaRec != null) {
+            glyfOffset = glyfRec.offset
+            // loca: numGlyphs+1 offsets, short (×2) or long format.
+            loca = IntArray(numGlyphs + 1)
+            if (indexToLocFormat == 0) {
+                for (i in 0..numGlyphs) loca[i] = glyfOffset + r.u16At(locaRec.offset + i * 2) * 2
+            } else {
+                for (i in 0..numGlyphs) loca[i] = glyfOffset + r.u32At(locaRec.offset + i * 4).toInt()
+            }
         } else {
-            for (i in 0..numGlyphs) loca[i] = glyfOffset + r.u32At(locaRec.offset + i * 4).toInt()
+            glyfOffset = -1
+            loca = IntArray(0)
         }
 
         // cmap is required for code-point lookup but legitimately absent from our subset fonts
         // (which are addressed purely by glyph id), so tolerate its absence.
         cmap = tables["cmap"]?.let { CmapLookup(data, it.offset) }
+
+        color = ColorBitmaps.parse(
+            data,
+            tables["sbix"]?.let { TableSpan(it.offset, it.length) },
+            tables["CBLC"]?.let { TableSpan(it.offset, it.length) },
+            tables["CBDT"]?.let { TableSpan(it.offset, it.length) },
+            numGlyphs,
+        )
     }
+
+    /** True if this face carries color bitmap glyphs (an emoji font). */
+    val hasColorBitmaps: Boolean get() = color != null
+
+    /** Raw PNG bytes of the color bitmap for [gid], or null if this glyph has no color bitmap. */
+    fun colorPng(gid: Int): ByteArray? = color?.pngFor(gid)
 
     private fun req(tag: String): TableRec =
         tables[tag] ?: throw IllegalArgumentException("Font missing required table '$tag'")
@@ -101,15 +129,15 @@ internal class TrueTypeFont(val data: ByteArray) {
         return r.u16At(hmtxOffset + i * 4)
     }
 
-    /** Raw glyph bytes from the glyf table (empty for whitespace/empty glyphs). */
+    /** Raw glyph bytes from the glyf table (empty for whitespace/empty glyphs, or outline-less fonts). */
     fun glyphBytes(gid: Int): ByteArray {
-        if (gid < 0 || gid >= numGlyphs) return ByteArray(0)
+        if (loca.isEmpty() || gid < 0 || gid >= numGlyphs) return ByteArray(0)
         val start = loca[gid]; val end = loca[gid + 1]
         return if (end <= start) ByteArray(0) else data.copyOfRange(start, end)
     }
 
     fun isComposite(gid: Int): Boolean {
-        if (gid < 0 || gid >= numGlyphs) return false
+        if (loca.isEmpty() || gid < 0 || gid >= numGlyphs) return false
         val start = loca[gid]; val end = loca[gid + 1]
         if (end - start < 2) return false
         return r.s16At(start) < 0 // numberOfContours < 0 => composite
