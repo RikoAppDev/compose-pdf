@@ -151,8 +151,8 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 
 ## Roadmap
 
-- GPOS kerning / ligatures (v1 uses advance-width shaping).
-- More image formats (JPEG + PNG today; WebP/others later).
+- GPOS kerning / ligatures.
+- More image formats (WebP, …).
 - Complex scripts / RTL / bidi.
-- Color **vector** emoji (`COLR`/`CPAL`) and ZWJ/skin-tone sequences — today bitmap emoji (`sbix`, `CBDT`) render, single code point at a time (see [Color emoji](#color-emoji)).
+- Color **vector** emoji (`COLR`/`CPAL`) and ZWJ / skin-tone sequences.
 - Long-word breaking inside narrow columns.
