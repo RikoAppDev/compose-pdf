@@ -34,11 +34,22 @@ private fun rasterToImageBitmap(w: Int, h: Int, argb: IntArray): ImageBitmap {
     return Image.makeRaster(info, bytes, w * 4).toComposeImageBitmap()
 }
 
-internal actual fun readPreviewResourceBytes(path: String): ByteArray {
-    val cl = Thread.currentThread().contextClassLoader
-        ?: object {}.javaClass.classLoader
-        ?: ClassLoader.getSystemClassLoader()
-    val stream = cl.getResourceAsStream(path)
-        ?: error("Preview resource not found on classpath: $path")
-    return stream.use { it.readBytes() }
+internal actual fun readPreviewResourceBytes(path: String): ByteArray = readBundledResource(path)
+
+/**
+ * Reads a resource bundled in this artifact's jar, trying the classloader that loaded THIS class
+ * first (it owns the bundled font), then the thread-context and system loaders. Mirrors the Android
+ * actual so the IDE/desktop `@Preview` runtimes resolve the font the same robust way.
+ */
+private fun readBundledResource(path: String): ByteArray {
+    val loaders = linkedSetOf<ClassLoader>()
+    object {}.javaClass.classLoader?.let { loaders.add(it) }
+    Thread.currentThread().contextClassLoader?.let { loaders.add(it) }
+    ClassLoader.getSystemClassLoader()?.let { loaders.add(it) }
+    for (cl in loaders) {
+        (cl.getResourceAsStream(path) ?: cl.getResourceAsStream("/$path"))?.let { s ->
+            return s.use { it.readBytes() }
+        }
+    }
+    error("Preview resource not found on classpath: $path")
 }

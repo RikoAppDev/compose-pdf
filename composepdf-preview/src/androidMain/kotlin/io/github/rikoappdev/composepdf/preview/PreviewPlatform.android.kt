@@ -30,11 +30,24 @@ internal actual fun decodePreviewImage(source: PreviewImageSource): ImageBitmap 
             .asImageBitmap()
 }
 
-internal actual fun readPreviewResourceBytes(path: String): ByteArray {
-    val cl = Thread.currentThread().contextClassLoader
-        ?: object {}.javaClass.classLoader
-        ?: ClassLoader.getSystemClassLoader()
-    val stream = cl.getResourceAsStream(path)
-        ?: error("Preview resource not found on classpath: $path")
-    return stream.use { it.readBytes() }
+internal actual fun readPreviewResourceBytes(path: String): ByteArray = readBundledResource(path)
+
+/**
+ * Reads a resource bundled in this artifact's jar across the classloaders that may be in play in
+ * Android Studio's `@Preview` (layoutlib) runtime. The loader that loaded THIS class is tried first:
+ * when the artifact is consumed as an AAR, the font lives in that classloader's `classes.jar`, while
+ * the thread context classloader is often layoutlib's and cannot see it (which caused the previous
+ * "Preview resource not found on classpath" failure in downstream `@Preview`s).
+ */
+private fun readBundledResource(path: String): ByteArray {
+    val loaders = linkedSetOf<ClassLoader>()
+    object {}.javaClass.classLoader?.let { loaders.add(it) }
+    Thread.currentThread().contextClassLoader?.let { loaders.add(it) }
+    ClassLoader.getSystemClassLoader()?.let { loaders.add(it) }
+    for (cl in loaders) {
+        (cl.getResourceAsStream(path) ?: cl.getResourceAsStream("/$path"))?.let { s ->
+            return s.use { it.readBytes() }
+        }
+    }
+    error("Preview resource not found on classpath: $path")
 }
