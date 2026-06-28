@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -24,6 +25,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextMeasurer
@@ -50,8 +52,9 @@ import kotlin.math.roundToInt
  * It runs the **same** layout pass as `render()` (via [previewPages]), so page count, line breaks,
  * tables, boxes, images and vectors land exactly where the exported PDF puts them. Block/line/image
  * positions come from the engine; intra-line glyph advances use the platform font (a faithful
- * approximation — the PDF stays the source of truth). Pages are stacked vertically and scrollable,
- * each scaled so the page width fills the available width.
+ * approximation — the PDF stays the source of truth). Every paginated page is stacked vertically (a
+ * subtle shadow separates them) — set [pageWidth] to render at a fixed width and let the preview
+ * self-size to the whole document, or leave it null to fill the available width and scroll.
  *
  * Fonts are the same Regular + Bold bytes you pass to `render()`. For zero-setup IDE previews of your
  * own documents, use [previewFontRegular]/[previewFontBold] (a font bundled in this preview artifact,
@@ -63,6 +66,13 @@ fun PdfPreview(
     regularFontBytes: ByteArray,
     boldFontBytes: ByteArray,
     modifier: Modifier = Modifier,
+    /**
+     * Width to render each page at. When `null` (default) pages fill the available width and the column
+     * fills its parent and scrolls — for an in-app/runtime view. Set it (e.g. `360.dp`) to make the
+     * preview **self-size**: each page gets this fixed width and the column wraps its content height, so
+     * a bare `@Preview` (no `widthDp`/`heightDp`) sizes itself to the whole paginated document.
+     */
+    pageWidth: Dp? = null,
     pageGap: Dp = 16.dp,
     pageColor: Color = Color.White,
     backgroundColor: Color = Color(0xFFE9ECEF),
@@ -83,19 +93,21 @@ fun PdfPreview(
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
 
+    val selfSize = pageWidth != null
+    val scroll = rememberScrollState()
     Column(
         modifier = modifier
-            .fillMaxSize()
+            .then(if (selfSize) Modifier else Modifier.fillMaxSize())
             .background(backgroundColor)
-            .verticalScroll(rememberScrollState())
+            .then(if (selfSize) Modifier else Modifier.verticalScroll(scroll))
             .padding(pageGap),
         verticalArrangement = Arrangement.spacedBy(pageGap),
     ) {
         for (page in pages) {
             Canvas(
-                Modifier
-                    .fillMaxWidth()
+                (if (pageWidth != null) Modifier.width(pageWidth) else Modifier.fillMaxWidth())
                     .aspectRatio(page.widthPt.toFloat() / page.heightPt)
+                    .shadow(3.dp)
                     .background(pageColor)
             ) {
                 val scale = size.width / page.widthPt
