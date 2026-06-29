@@ -78,22 +78,31 @@ pane as you edit the builder**, with no app run and no export. It's a design-tim
 
 ```kotlin
 // in androidMain — Android Studio renders androidMain @Preview live
-@Preview
+@PdfDocumentPreview                            // pick …2Pages / …3Pages … 5Pages for longer reports
 @Composable
 fun MyReportPreview() = PdfPreview(
     myReport(data),                            // your pdfDocument { … } spec
     previewFontRegular(), previewFontBold(),   // a bundled font, loaded SYNCHRONOUSLY for @Preview
+    pageWidth = PreviewPageWidthDp.dp,         // fixed page width → the preview self-sizes to the doc
 )
 ```
 
+- **Ready-made sizing annotations.** Android Studio's static `@Preview` needs `heightDp` as a
+  compile-time constant, so a tall multi-page document otherwise gets clipped or padded with an empty
+  strip. The artifact ships `@PdfDocumentPreview` (1 page) and `@PdfDocumentPreview2Pages` …
+  `@PdfDocumentPreview5Pages` with the exact size baked in for a `PreviewPageWidthDp` (360 dp) page —
+  put the one matching your report's page count on the `@Composable` and pass
+  `pageWidth = PreviewPageWidthDp.dp`, and the pane shows every page in full (nothing clipped, no empty
+  strip). A plain `@Preview` works too if you size it yourself.
 - `previewFontRegular()` / `previewFontBold()` load a bundled Noto Sans **synchronously** — the async
   Compose-resources API does not work in the IDE preview runtime. (For the real export, pass your own
   `.ttf` to `render()`; the core stays font-agnostic and bundles no font.)
 - Ready-to-open examples ship in the artifact (`ExamplePreviews.kt`): open it in the IDE and the pane
   renders the sample documents immediately.
 - The preview runs the **same** layout pass as `render()`, so page count, line breaks, tables, boxes,
-  images and vectors land where the PDF puts them; only intra-line glyph advances use the platform
-  font (a faithful approximation — the PDF stays the source of truth).
+  images and vectors land where the PDF puts them. Each glyph is drawn at the engine's exact x, so
+  columns and alignment match the PDF; only the glyph shapes come from the platform font (a faithful
+  approximation — the PDF stays the source of truth).
 - Targets **Android + JVM** (the platforms with an IDE preview runtime); the core engine remains
   Android + iOS + JVM. The UI-free `PdfDocumentSpec.previewPages(regular, bold)` in the core returns
   the resolved per-page draw model if you want to paint it on a different surface.
