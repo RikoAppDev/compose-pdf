@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -25,7 +26,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextMeasurer
@@ -52,9 +53,9 @@ import kotlin.math.roundToInt
  * It runs the **same** layout pass as `render()` (via [previewPages]), so page count, line breaks,
  * tables, boxes, images and vectors land exactly where the exported PDF puts them. Block/line/image
  * positions come from the engine; intra-line glyph advances use the platform font (a faithful
- * approximation — the PDF stays the source of truth). Every paginated page is stacked vertically (a
- * subtle shadow separates them) — set [pageWidth] to render at a fixed width and let the preview
- * self-size to the whole document, or leave it null to fill the available width and scroll.
+ * approximation — the PDF stays the source of truth). Every paginated page is stacked vertically as a
+ * clean bordered sheet on a grey backdrop — set [pageWidth] to render at a fixed width and let the
+ * preview self-size to the whole document, or leave it null to fill the available width and scroll.
  *
  * Fonts are the same Regular + Bold bytes you pass to `render()`. For zero-setup IDE previews of your
  * own documents, use [previewFontRegular]/[previewFontBold] (a font bundled in this preview artifact,
@@ -93,25 +94,60 @@ fun PdfPreview(
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
 
-    val selfSize = pageWidth != null
     val scroll = rememberScrollState()
-    Column(
-        modifier = modifier
-            .then(if (selfSize) Modifier else Modifier.fillMaxSize())
-            .background(backgroundColor)
-            .then(if (selfSize) Modifier else Modifier.verticalScroll(scroll))
-            .padding(pageGap),
-        verticalArrangement = Arrangement.spacedBy(pageGap),
-    ) {
-        for (page in pages) {
-            Canvas(
-                (if (pageWidth != null) Modifier.width(pageWidth) else Modifier.fillMaxWidth())
-                    .aspectRatio(page.widthPt.toFloat() / page.heightPt)
-                    .shadow(3.dp)
-                    .background(pageColor)
-            ) {
-                val scale = size.width / page.widthPt
-                for (op in page.ops) drawOp(op, scale, family, measurer, density, bitmaps)
+    if (pageWidth != null) {
+        // SELF-SIZE: render every page into ONE explicitly-sized Canvas, drawing the page sheets,
+        // borders and (clipped) content by hand. A single sized Canvas is measured reliably by every
+        // renderer — including Android Studio's layoutlib, where nested Box/Canvas explicit heights and
+        // a wrap-content Column collapsed the page height (cutting the sheet short). Each page is a full
+        // A4 rectangle, so the preview always shows the WHOLE page, never trimmed to its content.
+        val pageHeights = pages.map { pageWidth * (it.heightPt.toFloat() / it.widthPt) }
+        var totalHeight = pageGap
+        for (h in pageHeights) totalHeight += h + pageGap
+        Canvas(
+            modifier
+                .width(pageWidth + pageGap * 2)
+                .height(totalHeight)
+                .background(backgroundColor)
+        ) {
+            val left = pageGap.toPx()
+            val pw = pageWidth.toPx()
+            val gapPx = pageGap.toPx()
+            val borderPx = 1.dp.toPx()
+            var top = gapPx
+            for ((i, page) in pages.withIndex()) {
+                val ph = pageHeights[i].toPx()
+                drawRect(pageColor, topLeft = Offset(left, top), size = Size(pw, ph))
+                val scale = pw / page.widthPt
+                clipRect(left, top, left + pw, top + ph) {
+                    translate(left, top) {
+                        for (op in page.ops) drawOp(op, scale, family, measurer, density, bitmaps)
+                    }
+                }
+                drawRect(Color(0xFFCED4DA), topLeft = Offset(left, top), size = Size(pw, ph), style = Stroke(borderPx))
+                top += ph + gapPx
+            }
+        }
+    } else {
+        // RUNTIME fill-width view: pages fill the available width and the column scrolls.
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(backgroundColor)
+                .verticalScroll(scroll)
+                .padding(pageGap),
+            verticalArrangement = Arrangement.spacedBy(pageGap),
+        ) {
+            for (page in pages) {
+                Canvas(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(page.widthPt.toFloat() / page.heightPt)
+                        .background(pageColor)
+                ) {
+                    val scale = size.width / page.widthPt
+                    for (op in page.ops) drawOp(op, scale, family, measurer, density, bitmaps)
+                }
             }
         }
     }
@@ -144,18 +180,22 @@ private fun DrawScope.drawOp(
         is PreviewText -> {
             if (op.text.isEmpty()) return
             val sp = with(density) { (op.fontSizePt * scale).toSp() }
-            val layout = measurer.measure(
-                AnnotatedString(op.text),
-                style = TextStyle(
-                    color = Color(op.colorArgb),
-                    fontFamily = family,
-                    fontWeight = if (op.bold) FontWeight.Bold else FontWeight.Normal,
-                    fontSize = sp,
-                ),
-                maxLines = 1,
-                softWrap = false,
+            val style = TextStyle(
+                color = Color(op.colorArgb),
+                fontFamily = family,
+                fontWeight = if (op.bold) FontWeight.Bold else FontWeight.Normal,
+                fontSize = sp,
             )
-            drawText(layout, topLeft = Offset(op.xPt * scale, op.baselineYPt * scale - layout.firstBaseline))
+            // Draw each code point at the engine's exact x ([glyphXPt]) rather than as one measured run,
+            // so columns / right-aligned numbers line up with the PDF instead of drifting on the
+            // platform font's advances. Baseline is constant for the run, so it is measured once.
+            val cps = op.text.codePointStrings()
+            val baseY = op.baselineYPt * scale
+            for (i in cps.indices) {
+                val layout = measurer.measure(AnnotatedString(cps[i]), style = style, maxLines = 1, softWrap = false)
+                val gx = (if (i < op.glyphXPt.size) op.glyphXPt[i] else op.xPt) * scale
+                drawText(layout, topLeft = Offset(gx, baseY - layout.firstBaseline))
+            }
         }
 
         is PreviewImage -> {
@@ -196,4 +236,20 @@ private fun DrawScope.drawOp(
             }
         }
     }
+}
+
+/** Splits a string into one substring per Unicode code point (surrogate pairs kept together), so each
+ *  can be drawn at its own engine x. One entry per [PreviewText.glyphXPt] slot. */
+private fun String.codePointStrings(): List<String> {
+    val out = ArrayList<String>(length)
+    var i = 0
+    while (i < length) {
+        val c = this[i]
+        if (c.isHighSurrogate() && i + 1 < length && this[i + 1].isLowSurrogate()) {
+            out.add(substring(i, i + 2)); i += 2
+        } else {
+            out.add(c.toString()); i += 1
+        }
+    }
+    return out
 }

@@ -39,7 +39,10 @@ class PreviewPage internal constructor(
 
 sealed interface PreviewOp
 
-/** A line of text with its baseline at ([xPt], [baselineYPt]). [colorArgb] is opaque (0xFF alpha). */
+/** A line of text with its baseline at ([xPt], [baselineYPt]). [colorArgb] is opaque (0xFF alpha).
+ *  [glyphXPt] holds the absolute x (page points) of each code point in [text], computed from the
+ *  engine's own glyph advances — so the on-screen preview can place each glyph exactly where the PDF
+ *  puts it, instead of drifting on the platform font's slightly different advance widths. */
 class PreviewText internal constructor(
     val text: String,
     val xPt: Int,
@@ -47,6 +50,7 @@ class PreviewText internal constructor(
     val fontSizePt: Int,
     val bold: Boolean,
     val colorArgb: Int,
+    val glyphXPt: IntArray,
 ) : PreviewOp
 
 /** A filled and/or stroked rectangle (top-left origin); [cornerRadiusPt] > 0 rounds the corners. */
@@ -152,9 +156,18 @@ private fun StringBuilder.appendCp(cp: Int) {
 
 private fun TextOp.toPreview(book: FontBook): PreviewText {
     val map = book.gidToCp(weight)
+    val font = book.fontFor(weight)
+    val upm = font.unitsPerEm
     val sb = StringBuilder(gids.size)
-    for (g in gids) map[g]?.let { sb.appendCp(it) }
-    return PreviewText(sb.toString(), xPt, baselineYPt, fontSizePt, weight == io.github.rikoappdev.composepdf.FontWeight.Bold, color.argb())
+    val xs = ArrayList<Int>(gids.size)
+    var x = xPt
+    for (g in gids) {
+        // Record this glyph's start x, then advance by its engine advance width (same integer math as
+        // the layout/serializer) so positions match the PDF exactly.
+        map[g]?.let { sb.appendCp(it); xs.add(x) }
+        x += ((font.advanceWidth(g).toLong() * fontSizePt + upm / 2) / upm).toInt()
+    }
+    return PreviewText(sb.toString(), xPt, baselineYPt, fontSizePt, weight == io.github.rikoappdev.composepdf.FontWeight.Bold, color.argb(), xs.toIntArray())
 }
 
 private fun RectOp.toPreview() =
