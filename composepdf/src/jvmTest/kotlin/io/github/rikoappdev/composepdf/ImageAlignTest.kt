@@ -32,7 +32,7 @@ class ImageAlignTest {
     }
 
     /** Leftmost pixel column that contains a clearly-red pixel, rendering at 72 DPI (1pt = 1px). */
-    private fun leftmostRedColumn(align: TextAlign): Int {
+    private fun leftmostRedColumn(align: HorizontalAlignment): Int {
         val doc = pdfDocument(PageConfig(margin = 36.dp)) {
             image(redSquare(), height = 40.dp, fit = PhotoFit.Contain, align = align)
         }
@@ -52,9 +52,9 @@ class ImageAlignTest {
     @Test
     fun alignShiftsContainedImageHorizontally() {
         // A4 content runs x ∈ [36, 559] (523pt wide); the contained square is 40pt wide.
-        val start = leftmostRedColumn(TextAlign.Start)
-        val center = leftmostRedColumn(TextAlign.Center)
-        val end = leftmostRedColumn(TextAlign.End)
+        val start = leftmostRedColumn(HorizontalAlignment.Start)
+        val center = leftmostRedColumn(HorizontalAlignment.Center)
+        val end = leftmostRedColumn(HorizontalAlignment.End)
 
         assertTrue(start in 1..120, "Start should hug the left margin (~36), was $start")
         assertTrue(center in 220..340, "Center should sit mid-page (~277), was $center")

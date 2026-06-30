@@ -1,9 +1,9 @@
 package io.github.rikoappdev.composepdf.pdf
 
 import io.github.rikoappdev.composepdf.FontWeight
+import io.github.rikoappdev.composepdf.HorizontalAlignment
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PhotoFit
-import io.github.rikoappdev.composepdf.TextAlign
 import io.github.rikoappdev.composepdf.font.FontBook
 import io.github.rikoappdev.composepdf.render.ImageOp
 import io.github.rikoappdev.composepdf.render.Page
@@ -193,9 +193,9 @@ private fun buildContent(
             val dw = (iw * s).roundToInt()
             val dh = (ih * s).roundToInt()
             val ox = op.xPt + when (op.align) {
-                TextAlign.Start -> 0
-                TextAlign.Center -> (op.wPt - dw) / 2
-                TextAlign.End -> op.wPt - dw
+                HorizontalAlignment.Start -> 0
+                HorizontalAlignment.Center -> (op.wPt - dw) / 2
+                HorizontalAlignment.End -> op.wPt - dw
             }
             val oy = boxYPdf + (op.hPt - dh) / 2
             if (useCover) {
@@ -220,9 +220,9 @@ private fun buildContent(
             val dw = vw * s
             val dh = vh * s
             val ox = op.xPt + when (op.align) {
-                TextAlign.Start -> 0.0
-                TextAlign.Center -> (op.wPt - dw) / 2
-                TextAlign.End -> op.wPt - dw
+                HorizontalAlignment.Start -> 0.0
+                HorizontalAlignment.Center -> (op.wPt - dw) / 2
+                HorizontalAlignment.End -> op.wPt - dw
             }
             val oy = boxYPdf + (op.hPt - dh) / 2
             // The form lives in its own BBox [0 0 vw vh]; scale by dw/vw, dh/vh to the target box.

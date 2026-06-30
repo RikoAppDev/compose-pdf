@@ -35,6 +35,12 @@ enum class FontWeight { Normal, Bold }
 
 enum class TextAlign { Start, Center, End }
 
+/** Horizontal placement of a fitted image/vector inside its box (mirrors Compose `Alignment.Horizontal`). */
+enum class HorizontalAlignment { Start, Center, End }
+
+/** Vertical placement of a [row]'s cells within the row's height — the tallest cell (mirrors `Alignment.Vertical`). */
+enum class VerticalAlignment { Top, Center, Bottom }
+
 /**
  * How an image fills its box. [Cover] crops to fill; [Contain] fits the whole image preserving its
  * aspect ratio; [Smart] preserves aspect like [Contain] but crops-to-fill when an extreme aspect

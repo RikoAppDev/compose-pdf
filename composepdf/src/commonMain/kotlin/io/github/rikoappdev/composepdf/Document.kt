@@ -77,8 +77,13 @@ open class ContainerScope internal constructor(internal val images: MutableList<
         nodes.add(ColumnNode(ContainerScope(images).apply(build).nodes, gap.value))
     }
 
-    fun row(gap: Dp = 0.dp, build: RowScope.() -> Unit) {
-        nodes.add(RowScope(images).apply(build).toNode(gap.value))
+    /**
+     * A horizontal row of weighted [cell]s. [gap] is inserted between cells; [verticalAlignment]
+     * places each cell within the row's height (the tallest cell) — handy to vertically centre a
+     * short logo next to a taller text block.
+     */
+    fun row(gap: Dp = 0.dp, verticalAlignment: VerticalAlignment = VerticalAlignment.Top, build: RowScope.() -> Unit) {
+        nodes.add(RowScope(images).apply(build).toNode(gap.value, verticalAlignment))
     }
 
     /** A label/value line: [label] on the left, [value] right-aligned. Common in detail reports. */
@@ -120,11 +125,11 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * is embedded verbatim via `/DCTDecode`; PNG (`89 50 4E 47 …`) is decoded to RGB pixels and
      * embedded via `/FlateDecode`, with transparency carried as a `/SMask`. [width] = 0.dp fills the
      * available width. [fit] controls cover/contain/smart. [align] places the fitted image inside its
-     * box horizontally — [TextAlign.Center] (default) centers it; [TextAlign.Start] left-aligns it
-     * (handy for a logo in a wide cell). The intrinsic size comes from the JPEG SOF / PNG IHDR.
-     * Throws if the bytes are neither JPEG nor PNG, or an unsupported PNG variant.
+     * box horizontally — [HorizontalAlignment.Center] (default) centers it; [HorizontalAlignment.Start]
+     * left-aligns it (handy for a logo in a wide cell). The intrinsic size comes from the JPEG SOF /
+     * PNG IHDR. Throws if the bytes are neither JPEG nor PNG, or an unsupported PNG variant.
      */
-    fun image(imageBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover, align: TextAlign = TextAlign.Center) {
+    fun image(imageBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover, align: HorizontalAlignment = HorizontalAlignment.Center) {
         val index = images.size
         val (iw, ih) = when {
             isPng(imageBytes) -> {
@@ -147,13 +152,13 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * root) — as native PDF vector paths (crisp at any zoom, resolution-independent), compiled once
      * into a Form XObject. [width] = 0.dp fills the available width; [fit] controls how the vector's
      * viewport maps into the [width] × [height] box (default [PhotoFit.Contain] preserves aspect).
-     * [align] places the fitted vector inside its box horizontally — [TextAlign.Center] (default)
-     * centers it; [TextAlign.Start] left-aligns it (handy for a logo in a wide cell).
+     * [align] places the fitted vector inside its box horizontally — [HorizontalAlignment.Center]
+     * (default) centers it; [HorizontalAlignment.Start] left-aligns it (handy for a logo in a wide cell).
      * Supports paths (full M/L/H/V/C/S/Q/T/A/Z command set), basic SVG shapes, group transforms,
      * solid fills/strokes (nonzero & even-odd) and per-element opacity. Gradients, patterns, text and
      * filters are not supported. Throws if the bytes aren't a recognizable VectorDrawable/SVG.
      */
-    fun vector(vectorBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Contain, align: TextAlign = TextAlign.Center) {
+    fun vector(vectorBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Contain, align: HorizontalAlignment = HorizontalAlignment.Center) {
         require(isVectorXml(vectorBytes)) { "Not a vector image (expected VectorDrawable or SVG XML)" }
         val form = buildVectorForm(parseVector(vectorBytes))
         val index = images.size
@@ -241,11 +246,17 @@ class TableScope internal constructor(
 class RowScope internal constructor(private val images: MutableList<EmbeddedImage>) {
     private val cells = ArrayList<RowChild>()
 
+    /**
+     * A column in the row. [weight] > 0 splits the remaining width proportionally (like
+     * `Modifier.weight`). [weight] = 0 makes the cell **content-sized** — it shrinks to the intrinsic
+     * width of its content, and the leftover width goes to the weighted cells. Pair a content-sized
+     * cell with a `cell(1f) {}` spacer to push a logo / info block to the far left or right.
+     */
     fun cell(weight: Float = 1f, build: ContainerScope.() -> Unit) {
         cells.add(RowChild(ColumnNode(ContainerScope(images).apply(build).nodes, 0), weight))
     }
 
-    internal fun toNode(gapPt: Int) = RowNode(cells.toList(), gapPt)
+    internal fun toNode(gapPt: Int, valign: VerticalAlignment) = RowNode(cells.toList(), gapPt, valign)
 }
 
 class PdfContentScope internal constructor(images: MutableList<EmbeddedImage>) : ContainerScope(images) {
