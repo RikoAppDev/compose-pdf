@@ -2,6 +2,7 @@ package io.github.rikoappdev.composepdf.layout
 
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PhotoFit
+import io.github.rikoappdev.composepdf.TextAlign
 import io.github.rikoappdev.composepdf.TextStyle
 
 /** Immutable layout tree produced by the DSL and consumed by the measure/place engine. */
@@ -17,6 +18,7 @@ internal class ImageNode(
     val intrinsicW: Int,
     val intrinsicH: Int,
     val fit: PhotoFit,
+    val align: TextAlign = TextAlign.Center,
 ) : Node
 internal class VectorNode(
     val vectorIndex: Int,
@@ -25,6 +27,7 @@ internal class VectorNode(
     val viewportW: Int,
     val viewportH: Int,
     val fit: PhotoFit,
+    val align: TextAlign = TextAlign.Center,
 ) : Node
 internal class ColumnNode(val children: List<Node>, val gapPt: Int) : Node
 internal class RowChild(val node: Node, val weight: Float)

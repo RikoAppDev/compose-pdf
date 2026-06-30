@@ -119,10 +119,12 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * Embeds an image. The format is auto-detected from the bytes' magic number: JPEG (`FF D8 FF`)
      * is embedded verbatim via `/DCTDecode`; PNG (`89 50 4E 47 …`) is decoded to RGB pixels and
      * embedded via `/FlateDecode`, with transparency carried as a `/SMask`. [width] = 0.dp fills the
-     * available width. [fit] controls cover/contain/smart. The intrinsic size comes from the JPEG SOF
-     * / PNG IHDR. Throws if the bytes are neither JPEG nor PNG, or an unsupported PNG variant.
+     * available width. [fit] controls cover/contain/smart. [align] places the fitted image inside its
+     * box horizontally — [TextAlign.Center] (default) centers it; [TextAlign.Start] left-aligns it
+     * (handy for a logo in a wide cell). The intrinsic size comes from the JPEG SOF / PNG IHDR.
+     * Throws if the bytes are neither JPEG nor PNG, or an unsupported PNG variant.
      */
-    fun image(imageBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover) {
+    fun image(imageBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover, align: TextAlign = TextAlign.Center) {
         val index = images.size
         val (iw, ih) = when {
             isPng(imageBytes) -> {
@@ -137,7 +139,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
             }
             else -> throw IllegalArgumentException("Unsupported image format (expected JPEG or PNG)")
         }
-        nodes.add(ImageNode(index, width.value, height.value, iw, ih, fit))
+        nodes.add(ImageNode(index, width.value, height.value, iw, ih, fit, align))
     }
 
     /**
@@ -145,16 +147,18 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * root) — as native PDF vector paths (crisp at any zoom, resolution-independent), compiled once
      * into a Form XObject. [width] = 0.dp fills the available width; [fit] controls how the vector's
      * viewport maps into the [width] × [height] box (default [PhotoFit.Contain] preserves aspect).
+     * [align] places the fitted vector inside its box horizontally — [TextAlign.Center] (default)
+     * centers it; [TextAlign.Start] left-aligns it (handy for a logo in a wide cell).
      * Supports paths (full M/L/H/V/C/S/Q/T/A/Z command set), basic SVG shapes, group transforms,
      * solid fills/strokes (nonzero & even-odd) and per-element opacity. Gradients, patterns, text and
      * filters are not supported. Throws if the bytes aren't a recognizable VectorDrawable/SVG.
      */
-    fun vector(vectorBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Contain) {
+    fun vector(vectorBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Contain, align: TextAlign = TextAlign.Center) {
         require(isVectorXml(vectorBytes)) { "Not a vector image (expected VectorDrawable or SVG XML)" }
         val form = buildVectorForm(parseVector(vectorBytes))
         val index = images.size
         images.add(form)
-        nodes.add(VectorNode(index, width.value, height.value, form.width, form.height, fit))
+        nodes.add(VectorNode(index, width.value, height.value, form.width, form.height, fit, align))
     }
 
     /**
