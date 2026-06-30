@@ -1,6 +1,7 @@
 package io.github.rikoappdev.composepdf.layout
 
 import io.github.rikoappdev.composepdf.TextAlign
+import io.github.rikoappdev.composepdf.VerticalAlignment
 import io.github.rikoappdev.composepdf.font.TextMetrics
 import io.github.rikoappdev.composepdf.render.DrawOp
 import io.github.rikoappdev.composepdf.render.ImageOp
@@ -77,20 +78,44 @@ internal fun measure(node: Node, availWidthPt: Int, book: TextMetrics): Placeabl
     is RowNode -> {
         val n = node.children.size
         val totalGap = if (n > 1) node.gapPt * (n - 1) else 0
-        val avail = availWidthPt - totalGap
-        val totalWeight = node.children.sumOf { it.weight.toDouble() }.let { if (it <= 0.0) 1.0 else it }
+        val avail = (availWidthPt - totalGap).coerceAtLeast(0)
         val widths = IntArray(n)
-        var used = 0
+        // Content-sized cells (weight <= 0) take their intrinsic width first.
+        var autoUsed = 0
         for (i in 0 until n) {
-            widths[i] = ((avail * node.children[i].weight) / totalWeight).toInt()
-            used += widths[i]
+            if (node.children[i].weight <= 0f) {
+                widths[i] = intrinsicWidth(node.children[i].node, book).coerceIn(0, avail - autoUsed)
+                autoUsed += widths[i]
+            }
         }
-        if (n > 0) widths[n - 1] += (avail - used) // remainder to last cell
+        // Weighted cells split whatever width is left.
+        val weightedAvail = (avail - autoUsed).coerceAtLeast(0)
+        val totalWeight = node.children.sumOf { (if (it.weight > 0f) it.weight else 0f).toDouble() }
+        if (totalWeight > 0.0) {
+            var used = 0
+            var lastWeighted = -1
+            for (i in 0 until n) {
+                if (node.children[i].weight > 0f) {
+                    widths[i] = ((weightedAvail * node.children[i].weight) / totalWeight).toInt()
+                    used += widths[i]
+                    lastWeighted = i
+                }
+            }
+            widths[lastWeighted] += (weightedAvail - used) // rounding remainder → last weighted cell
+        }
         val measured = node.children.mapIndexed { i, c -> measure(c.node, widths[i], book) }
         val h = measured.maxOfOrNull { it.heightPt } ?: 0
         Placeable(availWidthPt, h) { x, y, out ->
             var cx = x
-            for (i in measured.indices) { measured[i].place(cx, y, out); cx += widths[i] + node.gapPt }
+            for (i in measured.indices) {
+                val dy = when (node.valign) {
+                    VerticalAlignment.Top -> 0
+                    VerticalAlignment.Center -> (h - measured[i].heightPt) / 2
+                    VerticalAlignment.Bottom -> h - measured[i].heightPt
+                }
+                measured[i].place(cx, y + dy, out)
+                cx += widths[i] + node.gapPt
+            }
         }
     }
 
@@ -128,4 +153,33 @@ internal fun measure(node: Node, availWidthPt: Int, book: TextMetrics): Placeabl
             }
         }
     }
+}
+
+/**
+ * Natural (unwrapped) width of [node] — sizes content-sized row cells (`cell(0f)`). Text measures its
+ * widest line as if it never wrapped; containers branch/sum over children. Dividers/tables fill, so
+ * they have no intrinsic width here (0).
+ */
+internal fun intrinsicWidth(node: Node, book: TextMetrics): Int = when (node) {
+    is SpacerNode -> node.widthPt
+    is DividerNode -> 0
+    is TextNode -> {
+        val fs = node.style.fontSize.value
+        node.text.split('\n').maxOf { book.measureWidthPt(it, node.style.fontWeight, fs) }
+    }
+    is ImageNode ->
+        if (node.widthPt > 0) node.widthPt
+        else if (node.intrinsicH > 0) node.heightPt * node.intrinsicW / node.intrinsicH
+        else node.heightPt
+    is VectorNode ->
+        if (node.widthPt > 0) node.widthPt
+        else if (node.viewportH > 0) node.heightPt * node.viewportW / node.viewportH
+        else node.heightPt
+    is ColumnNode -> node.children.maxOfOrNull { intrinsicWidth(it, book) } ?: 0
+    is RowNode -> {
+        val gaps = if (node.children.size > 1) node.gapPt * (node.children.size - 1) else 0
+        node.children.sumOf { intrinsicWidth(it.node, book) } + gaps
+    }
+    is BoxNode -> intrinsicWidth(node.child, book) + 2 * node.paddingPt
+    is TableNode -> 0
 }

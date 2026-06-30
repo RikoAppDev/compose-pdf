@@ -3,7 +3,7 @@ package io.github.rikoappdev.composepdf.render
 import io.github.rikoappdev.composepdf.FontWeight
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PhotoFit
-import io.github.rikoappdev.composepdf.TextAlign
+import io.github.rikoappdev.composepdf.HorizontalAlignment
 
 /**
  * Low-level positioned draw operations produced by the layout engine and consumed by the
@@ -50,7 +50,7 @@ internal class ImageOp(
     val intrinsicH: Int,
     val fit: PhotoFit,
     /** Horizontal placement of the fitted image inside its box (Start/Center/End). */
-    val align: TextAlign = TextAlign.Center,
+    val align: HorizontalAlignment = HorizontalAlignment.Center,
 ) : DrawOp
 
 /**
@@ -68,7 +68,7 @@ internal class VectorOp(
     val intrinsicH: Int,
     val fit: PhotoFit,
     /** Horizontal placement of the fitted vector inside its box (Start/Center/End). */
-    val align: TextAlign = TextAlign.Center,
+    val align: HorizontalAlignment = HorizontalAlignment.Center,
 ) : DrawOp
 
 internal class Page(val widthPt: Int, val heightPt: Int) {

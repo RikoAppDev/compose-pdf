@@ -1,9 +1,9 @@
 package io.github.rikoappdev.composepdf.preview
 
+import io.github.rikoappdev.composepdf.HorizontalAlignment
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PdfDocumentSpec
 import io.github.rikoappdev.composepdf.PhotoFit
-import io.github.rikoappdev.composepdf.TextAlign
 import io.github.rikoappdev.composepdf.font.FontBook
 import io.github.rikoappdev.composepdf.layout
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
@@ -177,7 +177,7 @@ private fun RectOp.toPreview() =
 /** Result of fitting intrinsic [iw]×[ih] into a box, mirroring the serializer's cover/contain/smart. */
 private class Placed(val ox: Double, val oy: Double, val dw: Double, val dh: Double, val cover: Boolean)
 
-private fun place(boxX: Int, boxY: Int, boxW: Int, boxH: Int, iw: Double, ih: Double, fit: PhotoFit, align: TextAlign): Placed {
+private fun place(boxX: Int, boxY: Int, boxW: Int, boxH: Int, iw: Double, ih: Double, fit: PhotoFit, align: HorizontalAlignment): Placed {
     val coverS = maxOf(boxW / iw, boxH / ih)
     val containS = minOf(boxW / iw, boxH / ih)
     val useCover = when (fit) {
@@ -188,9 +188,9 @@ private fun place(boxX: Int, boxY: Int, boxW: Int, boxH: Int, iw: Double, ih: Do
     val s = if (useCover) coverS else containS
     val dw = iw * s
     val ox = boxX + when (align) {
-        TextAlign.Start -> 0.0
-        TextAlign.Center -> (boxW - dw) / 2
-        TextAlign.End -> boxW - dw
+        HorizontalAlignment.Start -> 0.0
+        HorizontalAlignment.Center -> (boxW - dw) / 2
+        HorizontalAlignment.End -> boxW - dw
     }
     return Placed(ox, boxY + (boxH - ih * s) / 2, dw, ih * s, useCover)
 }
