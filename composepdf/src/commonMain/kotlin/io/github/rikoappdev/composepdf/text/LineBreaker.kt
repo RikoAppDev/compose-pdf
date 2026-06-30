@@ -5,7 +5,9 @@ import io.github.rikoappdev.composepdf.font.TextMetrics
 
 /** Greedy word-wrap. Honors explicit `\n` as hard breaks; a word wider than the column is
  *  placed alone (it may overflow — long-word breaking is a later refinement). Deterministic:
- *  decisions come only from integer font-unit measurements. */
+ *  decisions come only from integer font-unit measurements. Trailing whitespace is trimmed from each
+ *  produced line so an invisible trailing space / tab / NBSP can't shift right- or centre-aligned
+ *  text (splitting on `' '` already drops ASCII spaces, but not tabs or non-breaking spaces). */
 internal object LineBreaker {
 
     fun wrap(text: String, weight: FontWeight, fontSizePt: Int, maxWidthPt: Int, book: TextMetrics): List<String> {
@@ -20,11 +22,11 @@ internal object LineBreaker {
                 if (line.isEmpty() || book.measureWidthPt(candidate, weight, fontSizePt) <= maxWidthPt) {
                     line = StringBuilder(candidate)
                 } else {
-                    out.add(line.toString())
+                    out.add(line.toString().trimEnd())
                     line = StringBuilder(word)
                 }
             }
-            out.add(line.toString())
+            out.add(line.toString().trimEnd())
         }
         return out
     }

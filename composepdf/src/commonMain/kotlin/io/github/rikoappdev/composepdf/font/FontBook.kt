@@ -71,16 +71,27 @@ internal class FontBook(
             for (cp in text.toCodePoints()) sum += font.advanceWidth(font.gidForCodePoint(cp))
             return ((sum * fontSizePt + upm / 2) / upm).toInt()
         }
-        // Emoji-aware: emoji code points consume the emoji advance, joiners/selectors consume nothing.
-        var sum = 0
+        // Emoji-aware: mirror placeLine exactly. A maximal run of text glyphs is drawn as ONE TextOp and
+        // advances by widthOfPt(run) — i.e. font units summed, then rounded to points ONCE. Emoji consume
+        // their bitmap advance; joiners/selectors consume nothing. Rounding each glyph separately here (the
+        // old code) over-counts the run by up to ~0.5pt per glyph versus what is actually drawn, which then
+        // shifts right-aligned text left by that error. Accumulate units and flush round-once per run.
+        var widthPt = 0
+        var runUnits = 0L
+        fun flushRun() {
+            if (runUnits == 0L) return
+            widthPt += ((runUnits * fontSizePt + upm / 2) / upm).toInt()
+            runUnits = 0L
+        }
         for (cp in text.toCodePoints()) {
             when (val k = classify(cp, w)) {
-                is Glyph -> sum += scaleAdvance(font.advanceWidth(font.gidForCodePoint(cp)), upm, fontSizePt)
-                is Emoji -> sum += emojiAdvancePt(k.gid, fontSizePt)
+                is Glyph -> runUnits += font.advanceWidth(font.gidForCodePoint(cp))
+                is Emoji -> { flushRun(); widthPt += emojiAdvancePt(k.gid, fontSizePt) }
                 ZeroWidth -> {}
             }
         }
-        return sum
+        flushRun()
+        return widthPt
     }
 
     /** Width of already-shaped [gids] in PDF points at [fontSizePt]. */

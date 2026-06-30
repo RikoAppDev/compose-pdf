@@ -161,12 +161,14 @@ private fun TextOp.toPreview(book: FontBook): PreviewText {
     val upm = font.unitsPerEm
     val sb = StringBuilder(gids.size)
     val xs = ArrayList<Int>(gids.size)
-    var x = xPt
+    var cumUnits = 0L
     for (g in gids) {
-        // Record this glyph's start x, then advance by its engine advance width (same integer math as
-        // the layout/serializer) so positions match the PDF exactly.
-        map[g]?.let { sb.appendCp(it); xs.add(x) }
-        x += ((font.advanceWidth(g).toLong() * fontSizePt + upm / 2) / upm).toInt()
+        // Place each glyph at the rounded CUMULATIVE advance (font units → points), NOT a running sum
+        // of per-glyph rounded deltas. This matches the engine's round-once measureWidthPt, so the run
+        // ends at exactly xPt + measureWidthPt; the old per-glyph rounding accumulated ~0.4pt per
+        // tabular digit and pushed digit-heavy right-aligned text past its edge (preview only).
+        map[g]?.let { sb.appendCp(it); xs.add(xPt + ((cumUnits * fontSizePt + upm / 2) / upm).toInt()) }
+        cumUnits += font.advanceWidth(g)
     }
     return PreviewText(sb.toString(), xPt, baselineYPt, fontSizePt, weight == io.github.rikoappdev.composepdf.FontWeight.Bold, color.argb(), xs.toIntArray())
 }
