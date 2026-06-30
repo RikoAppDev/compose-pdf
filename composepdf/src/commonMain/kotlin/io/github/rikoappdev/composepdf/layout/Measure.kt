@@ -30,14 +30,14 @@ internal fun measure(node: Node, availWidthPt: Int, book: TextMetrics): Placeabl
     is ImageNode -> {
         val w = if (node.widthPt in 1..availWidthPt) node.widthPt else availWidthPt
         Placeable(w, node.heightPt) { x, y, out ->
-            out.add(ImageOp(x, y, w, node.heightPt, node.imageIndex, node.intrinsicW, node.intrinsicH, node.fit))
+            out.add(ImageOp(x, y, w, node.heightPt, node.imageIndex, node.intrinsicW, node.intrinsicH, node.fit, node.align))
         }
     }
 
     is VectorNode -> {
         val w = if (node.widthPt in 1..availWidthPt) node.widthPt else availWidthPt
         Placeable(w, node.heightPt) { x, y, out ->
-            out.add(VectorOp(x, y, w, node.heightPt, node.vectorIndex, node.viewportW, node.viewportH, node.fit))
+            out.add(VectorOp(x, y, w, node.heightPt, node.vectorIndex, node.viewportW, node.viewportH, node.fit, node.align))
         }
     }
 

@@ -3,6 +3,7 @@ package io.github.rikoappdev.composepdf.preview
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PdfDocumentSpec
 import io.github.rikoappdev.composepdf.PhotoFit
+import io.github.rikoappdev.composepdf.TextAlign
 import io.github.rikoappdev.composepdf.font.FontBook
 import io.github.rikoappdev.composepdf.layout
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
@@ -176,7 +177,7 @@ private fun RectOp.toPreview() =
 /** Result of fitting intrinsic [iw]×[ih] into a box, mirroring the serializer's cover/contain/smart. */
 private class Placed(val ox: Double, val oy: Double, val dw: Double, val dh: Double, val cover: Boolean)
 
-private fun place(boxX: Int, boxY: Int, boxW: Int, boxH: Int, iw: Double, ih: Double, fit: PhotoFit): Placed {
+private fun place(boxX: Int, boxY: Int, boxW: Int, boxH: Int, iw: Double, ih: Double, fit: PhotoFit, align: TextAlign): Placed {
     val coverS = maxOf(boxW / iw, boxH / ih)
     val containS = minOf(boxW / iw, boxH / ih)
     val useCover = when (fit) {
@@ -185,7 +186,13 @@ private fun place(boxX: Int, boxY: Int, boxW: Int, boxH: Int, iw: Double, ih: Do
         PhotoFit.Smart -> minOf(iw * containS / boxW, ih * containS / boxH) < 0.25
     }
     val s = if (useCover) coverS else containS
-    return Placed(boxX + (boxW - iw * s) / 2, boxY + (boxH - ih * s) / 2, iw * s, ih * s, useCover)
+    val dw = iw * s
+    val ox = boxX + when (align) {
+        TextAlign.Start -> 0.0
+        TextAlign.Center -> (boxW - dw) / 2
+        TextAlign.End -> boxW - dw
+    }
+    return Placed(ox, boxY + (boxH - ih * s) / 2, dw, ih * s, useCover)
 }
 
 private fun ImageOp.toPreview(images: List<EmbeddedImage>): PreviewImage? {
@@ -197,7 +204,7 @@ private fun ImageOp.toPreview(images: List<EmbeddedImage>): PreviewImage? {
     }
     val iw = (if (intrinsicW > 0) intrinsicW else wPt).toDouble()
     val ih = (if (intrinsicH > 0) intrinsicH else hPt).toDouble()
-    val p = place(xPt, yPt, wPt, hPt, iw, ih, fit)
+    val p = place(xPt, yPt, wPt, hPt, iw, ih, fit, align)
     return PreviewImage(
         p.ox.toFloat(), p.oy.toFloat(), p.dw.toFloat(), p.dh.toFloat(),
         p.cover, xPt.toFloat(), yPt.toFloat(), wPt.toFloat(), hPt.toFloat(), source,
@@ -225,7 +232,7 @@ private fun VectorOp.toPreview(images: List<EmbeddedImage>): PreviewVector? {
     val vw = model.viewportW
     val vh = model.viewportH
     if (vw <= 0.0 || vh <= 0.0) return null
-    val p = place(xPt, yPt, wPt, hPt, vw, vh, fit)
+    val p = place(xPt, yPt, wPt, hPt, vw, vh, fit, align)
     val s = p.dw / vw
     fun px(x: Double) = (p.ox + x * s).toFloat()
     fun py(y: Double) = (p.oy + y * s).toFloat()
