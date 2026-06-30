@@ -165,3 +165,4 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 - Complex scripts / RTL / bidi.
 - Color **vector** emoji (`COLR`/`CPAL`) and ZWJ / skin-tone sequences.
 - Long-word breaking inside narrow columns.
+- Dedicated `Alignment.Horizontal` type for `image`/`vector` `align` (currently reuses `TextAlign`) + vertical alignment.
