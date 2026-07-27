@@ -7,3 +7,5 @@ local.properties
 *.iml
 .DS_Store
 captures/
+# Machine-generated daemon-JVM pin (conflicts with auto-download=false in gradle.properties)
+gradle/gradle-daemon-jvm.properties

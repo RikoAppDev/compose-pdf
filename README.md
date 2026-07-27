@@ -24,13 +24,14 @@ to users.
 ## Features
 
 - Embedded **subset Type0/CIDFontType2 (Identity-H) + ToUnicode** → selectable & searchable text, including Latin diacritics (composite glyphs subset correctly).
-- **Compose-style DSL**: `text`, `spacer`, `divider`, `row(verticalAlignment) { cell(weight) { } }` (a `cell(0f)` shrinks to its content's width — pair it with a `cell(1f) {}` spacer to push a logo / info block to an edge; `verticalAlignment` centres a short cell against a taller one), `column`, `box(padding, border, background)`, `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through **and PNG** — decoded in pure Kotlin to a `/FlateDecode` image with an `/SMask` for transparency; `PhotoFit.Cover` / `Contain` / `Smart` — smart preserves aspect but crops extreme strips; `align = HorizontalAlignment.Start` left-aligns a contained logo in a wide cell), `table` (weighted columns, repeating header, total rows, optional `zebra` striping).
+- **Compose-style DSL**: `text`, `spacer`, `divider`, `row(verticalAlignment) { cell(weight) { } }` (a `cell(0f)` shrinks to its content's width — pair it with a `cell(1f) {}` spacer to push a logo / info block to an edge; `verticalAlignment` centres a short cell against a taller one), `column`, `box(padding, border, background)`, `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through **and PNG** — decoded in pure Kotlin to a `/FlateDecode` image with an `/SMask` for transparency; `PhotoFit.Cover` / `Contain` / `Smart` — smart preserves aspect but crops extreme strips; `align = HorizontalAlignment.Start` left-aligns a contained logo in a wide cell; both take a [`PdfImageSource`](#unbounded-documents-lazy-image-sources--renderto) instead of bytes to keep photo-heavy documents bounded), `table` (weighted columns, repeating header, total rows, optional `zebra` striping).
 - **Vector images (SVG + Android VectorDrawable)**: `vector(bytes, …)` imports both formats (auto-detected) into native, resolution-independent PDF **vector paths** — the full SVG/VectorDrawable path grammar (incl. elliptical arcs), basic shapes (`rect`/`circle`/`ellipse`/`line`/`poly…`), `<group>`/`transform`, nonzero & even-odd fill, stroke, per-element opacity, `currentColor` and the full CSS named-color set. Embedded as a reusable **Form XObject**, so a logo repeated in a header costs a single object. `align` (like `image`) left/center/right-aligns the logo inside its cell. Pure-Kotlin, dependency-free (no XML library).
 - **Header / footer / page numbers**: repeating `header`/`footer` bands and an auto page-number line whose space is reserved (content never overlaps it). `PageConfig` controls it all — `repeatHeader` (every page vs. first page only, like a title block), `pageNumberFormat`, `pageNumberStyle`, `pageNumbers`.
 - Familiar value types: `TextStyle` (with `copy`), `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight`, `TextAlign`.
 - **Automatic pagination**: paragraphs split by line; tables split by row (repeating the header); bordered **boxes and columns split across pages** with the border/background redrawn per fragment; rows and images stay atomic (never cut). Optional keep-together moves a block whole instead of leaving a sliver.
 - **Color emoji**: pass an optional emoji font (`render(regular, bold, emoji)`) and emoji render as inline color bitmaps from `sbix` / `CBLC`+`CBDT` faces (the "phone" look) — see [Color emoji](#color-emoji). Opt-in; omit it and output is unchanged.
 - **Progress reporting**: `render(regular, bold, onProgress = { … })` calls the optional `onProgress: (Float) -> Unit` with `0f`→`1f` as pages are laid out and serialized — drive a real determinate progress bar. Omit it and output is byte-for-byte unchanged.
+- **Unbounded documents**: `image`/`photoGrid` take a [`PdfImageSource`](#unbounded-documents-lazy-image-sources--renderto) (`{ File(path).readBytes() }`) so JPEG photos are pulled one at a time and released, and `renderTo(sink, regular, bold)` writes the **byte-for-byte identical** PDF straight into a `PdfSink` instead of returning one array. Neither the photos nor the finished file ever exist whole — a measured 397 MB, 870-photo report streams in a 64 MiB heap, the case that OOMs photo-heavy exports on Android's default heap. `image(bytes)` stays for logos and small documents.
 - **FlateDecode compression**: content streams, the subset font program and the ToUnicode CMap are deflated by a pure-Kotlin encoder (deterministic on every platform).
 - Regular + Bold faces (bundled).
 
@@ -146,6 +147,50 @@ val pdf = document.render(regular, bold, emoji)
 - The on-screen [`@Preview` bridge](#live-preview-design-time-preview) renders emoji code points as
   text (`.notdef`), not color bitmaps — the color emoji live in the exported PDF only.
 
+### Unbounded documents: lazy image sources + `renderTo`
+
+Two things scale with a photo report: the photos you hold, and the finished PDF. Drop both and the
+document size stops mattering — **`PdfImageSource` for the photos, `renderTo` for the file**.
+
+```kotlin
+val document = pdfDocument {
+    // Photos addressed by file. Nothing is read until the engine needs it.
+    photoGrid(paths.map { path -> PdfImageSource { File(path).readBytes() } }, perRow = 3, cellHeight = 96.dp)
+}
+
+FileOutputStream(target).buffered().use { out ->
+    document.renderTo({ bytes, offset, length -> out.write(bytes, offset, length) }, regular, bold)
+}
+```
+
+- `PdfImageSource` is a `fun interface` with a single `readBytes()` — a file, a content-provider
+  stream, a cache entry. `image(source, …)` and `photoGrid(sources, …)` are the primary forms;
+  `image(bytes, …)` / `photoGrid(listOfByteArrays, …)` are convenience overloads that wrap the array
+  in a source that returns it. There is **one** image path, not a separate "streaming mode".
+- A **JPEG** is read once when the DSL records it — just to read its `/DCTDecode` dimensions and
+  size — then dropped, and pulled back **one photo at a time** while the file is written. A **PNG**
+  is decoded eagerly and kept: its `/Length` is the *deflated* size, which is only knowable by
+  compressing it, and that length is written before the payload. PNGs are logos, not photo streams.
+- `readBytes()` **must return the same bytes every time**: `/Length` and every later cross-reference
+  offset come from the first measurement. A changed length aborts the render with a message naming
+  the source rather than emitting a corrupt xref.
+- `PdfSink` is a `fun interface` with a single `write(bytes, offset, length)` — adapt it to any
+  destination (a `FileOutputStream`, an `NSFileHandle`, a digest). The engine writes strictly
+  sequentially, never seeks, and calls `write` from the single thread `renderTo` runs on.
+- Output is **byte-for-byte identical** across all four combinations — eager or lazy, `render()` or
+  `renderTo()`. Only the memory profile changes:
+
+  | photos supplied as | `render()` → `ByteArray` | `renderTo(sink)` |
+  |---|---|---|
+  | `ByteArray` | your photos + the whole file | your photos |
+  | `PdfImageSource` | one photo + the whole file | **one photo** |
+
+- Measured (`MemoryStressTest`, synthetic 444 KB photos, forked JVM): an **870-photo, 397 MB** report
+  streams from file-backed sources in a **64 MiB heap**, live set 3.5 MiB above baseline — and
+  doubling the photo count moves that by 1.14×, not 2×.
+- Emoji, fonts and `onProgress` work exactly as in `render`. If the sink throws, the exception
+  propagates and cleaning up the partial file is the caller's job.
+
 ## Building & testing
 
 ```
@@ -153,6 +198,10 @@ val pdf = document.render(regular, bold, emoji)
 ./gradlew :composepdf:compileCommonMainKotlinMetadata  # shared-code purity check
 ./gradlew :composepdf:compileAndroidMain               # Android target
 ./gradlew :composepdf:iosSimulatorArm64Test            # runs the golden on iOS (macOS only)
+
+# Opt-in memory harness (minutes, hundreds of MB of temp disk; excluded from `check`/CI):
+./gradlew :composepdf:jvmStressTest                                                       # eager ladder, 460m heap
+./gradlew :composepdf:jvmStressTest -PstressHeap=128m -PstressTests="*MemoryStressTest.c_*"  # lazy-source ladder
 ```
 Requires JDK 17+ (CI uses 21). The cross-platform golden test runs the layout engine over a fixed
 document with deterministic metrics and asserts identical integer glyph origins on every platform.
@@ -160,6 +209,10 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 
 ## Roadmap
 
+- **`wasmJs` target** — the engine is dependency-free `commonMain`, so a browser/Node build is mostly
+  build configuration; `PdfSink`/`PdfImageSource` already fit Web Worker + OPFS streaming. (For web
+  apps, server-side generation through the existing JVM target is the recommended path — same
+  builders, byte-identical output.)
 - GPOS kerning / ligatures.
 - More image formats (WebP, …).
 - Complex scripts / RTL / bidi.

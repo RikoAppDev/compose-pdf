@@ -200,7 +200,10 @@ private fun place(boxX: Int, boxY: Int, boxW: Int, boxH: Int, iw: Double, ih: Do
 private fun ImageOp.toPreview(images: List<EmbeddedImage>): PreviewImage? {
     val img = images.getOrNull(imageIndex) ?: return null
     val source: PreviewImageSource = when (img) {
-        is JpegImage -> PreviewEncodedImage(img.bytes)
+        // Pulled from the source, like the serializer does: the spec keeps a JPEG's dimensions, not
+        // its bytes. Preview is a design-time tool over one screenful of pages, so a per-page re-read
+        // is the right trade for keeping documents unbounded in size.
+        is JpegImage -> PreviewEncodedImage(img.source.readBytes())
         is PngImageData -> PreviewRasterImage(img.width, img.height, pngArgb(img))
         else -> return null
     }

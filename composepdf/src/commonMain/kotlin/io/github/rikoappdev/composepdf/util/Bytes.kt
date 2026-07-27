@@ -30,10 +30,14 @@ internal class ByteReader(val data: ByteArray, var pos: Int = 0) {
 /** Growable big-endian byte buffer for assembling sfnt tables and PDF bytes. */
 internal class ByteBuf(initial: Int = 1024) {
     private var buf = ByteArray(if (initial < 16) 16 else initial)
+    private var handedOut = false
     var size = 0
         private set
 
     private fun ensure(n: Int) {
+        // Once toByteArray() handed out the backing array (exact-size case) the caller owns it;
+        // writing again would silently corrupt their bytes. Fail loudly instead.
+        check(!handedOut) { "ByteBuf written after toByteArray() handed out its backing array" }
         if (size + n > buf.size) {
             var ns = buf.size * 2
             while (ns < size + n) ns *= 2
@@ -50,7 +54,9 @@ internal class ByteBuf(initial: Int = 1024) {
     /** Writes [s] as one byte per char (Latin-1/ASCII) — correct for PDF syntax tokens. */
     fun ascii(s: String) { ensure(s.length); for (c in s) buf[size++] = (c.code and 0xFF).toByte() }
     fun padTo(align: Int) { while (size % align != 0) u8(0) }
-    fun toByteArray(): ByteArray = buf.copyOf(size)
+    /** When the buffer was sized exactly, hands out the backing array without a copy — the caller
+     *  then owns it and any further write to this ByteBuf throws (see [ensure]). */
+    fun toByteArray(): ByteArray = if (size == buf.size) { handedOut = true; buf } else buf.copyOf(size)
 }
 
 /** Lowercase not used; PDF hex strings are conventionally uppercase. */

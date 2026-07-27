@@ -28,11 +28,13 @@ import io.github.rikoappdev.composepdf.pdf.JpegImage
 import io.github.rikoappdev.composepdf.pdf.PngImageData
 import io.github.rikoappdev.composepdf.pdf.buildVectorForm
 import io.github.rikoappdev.composepdf.pdf.serializePdf
+import io.github.rikoappdev.composepdf.pdf.serializePdfTo
 import io.github.rikoappdev.composepdf.render.Page
 import io.github.rikoappdev.composepdf.render.RectOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
 import io.github.rikoappdev.composepdf.vector.isVectorXml
 import io.github.rikoappdev.composepdf.vector.parseVector
+import kotlin.jvm.JvmName
 
 enum class PageSize(val widthPt: Int, val heightPt: Int) {
     A4(595, 842),
@@ -121,30 +123,54 @@ open class ContainerScope internal constructor(internal val images: MutableList<
     }
 
     /**
-     * Embeds an image. The format is auto-detected from the bytes' magic number: JPEG (`FF D8 FF`)
-     * is embedded verbatim via `/DCTDecode`; PNG (`89 50 4E 47 …`) is decoded to RGB pixels and
-     * embedded via `/FlateDecode`, with transparency carried as a `/SMask`. [width] = 0.dp fills the
-     * available width. [fit] controls cover/contain/smart. [align] places the fitted image inside its
-     * box horizontally — [HorizontalAlignment.Center] (default) centers it; [HorizontalAlignment.Start]
-     * left-aligns it (handy for a logo in a wide cell). The intrinsic size comes from the JPEG SOF /
-     * PNG IHDR. Throws if the bytes are neither JPEG nor PNG, or an unsupported PNG variant.
+     * Embeds an image pulled from a [PdfImageSource] — a file, a content-provider stream, a cache
+     * entry. This is the primary form: a document of any size stays bounded in memory because a
+     * **JPEG** is read here only to learn its size, then dropped, and read back one photo at a time
+     * while the file is written (pair it with [PdfDocumentSpec.renderTo] and neither the photos nor
+     * the finished PDF ever exist as a whole). See [PdfImageSource] for the (strict) contract.
+     *
+     * The format is auto-detected from the magic number: JPEG (`FF D8 FF`) is embedded verbatim via
+     * `/DCTDecode`; PNG (`89 50 4E 47 …`) is decoded to RGB pixels and embedded via `/FlateDecode`,
+     * with transparency carried as a `/SMask`. **PNG is decoded eagerly here and the pixels are kept**
+     * — unlike a pass-through JPEG, a PNG's `/Length` is its *deflated* size, which is only known by
+     * compressing it, and the head carrying that `/Length` is written before the payload. PNGs are
+     * logos and icons, not photo streams, so this costs a bounded, small amount.
+     *
+     * [width] = 0.dp fills the available width. [fit] controls cover/contain/smart. [align] places the
+     * fitted image inside its box horizontally — [HorizontalAlignment.Center] (default) centers it;
+     * [HorizontalAlignment.Start] left-aligns it (handy for a logo in a wide cell). The intrinsic size
+     * comes from the JPEG SOF / PNG IHDR. Throws if the bytes are neither JPEG nor PNG, or an
+     * unsupported PNG variant.
      */
-    fun image(imageBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover, align: HorizontalAlignment = HorizontalAlignment.Center) {
+    fun image(source: PdfImageSource, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover, align: HorizontalAlignment = HorizontalAlignment.Center) {
         val index = images.size
+        // Probe read: alive only for this call. The JPEG branch keeps nothing but four numbers, so a
+        // 500-photo grid never holds more than one photo at a time.
+        val probe = source.readBytes()
         val (iw, ih) = when {
-            isPng(imageBytes) -> {
-                val png = decodePng(imageBytes)
+            isPng(probe) -> {
+                val png = decodePng(probe)
                 images.add(PngImageData(png.width, png.height, png.rgb, png.alpha))
                 png.width to png.height
             }
-            isJpeg(imageBytes) -> {
-                val info = parseJpeg(imageBytes)
-                images.add(JpegImage(info.width, info.height, info.components, imageBytes))
+            isJpeg(probe) -> {
+                val info = parseJpeg(probe)
+                images.add(JpegImage(info.width, info.height, info.components, probe.size, source))
                 info.width to info.height
             }
             else -> throw IllegalArgumentException("Unsupported image format (expected JPEG or PNG)")
         }
         nodes.add(ImageNode(index, width.value, height.value, iw, ih, fit, align))
+    }
+
+    /**
+     * Convenience overload of [image] for bytes already in hand — identical output, and identical
+     * machinery: [imageBytes] is wrapped in a source that returns it. Simple and fine for logos,
+     * screenshots and small documents; for a report full of photos prefer the [PdfImageSource] form,
+     * which lets the engine hold one photo at a time instead of all of them.
+     */
+    fun image(imageBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover, align: HorizontalAlignment = HorizontalAlignment.Center) {
+        image(PdfImageSource { imageBytes }, width, height, fit, align)
     }
 
     /**
@@ -167,20 +193,33 @@ open class ContainerScope internal constructor(internal val images: MutableList<
     }
 
     /**
-     * Lays out [photos] (JPEG or PNG bytes) in a grid of [perRow] equal cells, each [cellHeight] tall.
+     * Lays out [photos] in a grid of [perRow] equal cells, each [cellHeight] tall, pulling each photo
+     * from its [PdfImageSource]. This is the form that scales: a thousand-photo log costs one photo of
+     * memory at a time, not a thousand (see [image] and [PdfImageSource]).
+     *
      * [fit] = [PhotoFit.Cover] crops each photo to fill its cell; [PhotoFit.Contain] fits the whole
      * photo preserving aspect; [PhotoFit.Smart] preserves aspect but crops extreme-aspect photos so
      * they don't become thin slivers.
      */
-    fun photoGrid(photos: List<ByteArray>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, fit: PhotoFit = PhotoFit.Cover) {
+    @JvmName("photoGridFromSources")
+    fun photoGrid(photos: List<PdfImageSource>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, fit: PhotoFit = PhotoFit.Cover) {
         require(perRow >= 1) { "photoGrid perRow must be >= 1" }
         photos.chunked(perRow).forEachIndexed { rowIndex, chunk ->
             if (rowIndex > 0) spacer(gap)
             row(gap) {
-                chunk.forEach { bytes -> cell(1f) { image(bytes, width = 0.dp, height = cellHeight, fit = fit) } }
+                chunk.forEach { source -> cell(1f) { image(source, width = 0.dp, height = cellHeight, fit = fit) } }
                 repeat(perRow - chunk.size) { cell(1f) {} } // pad to keep cells aligned
             }
         }
+    }
+
+    /**
+     * Convenience overload of [photoGrid] for JPEG/PNG byte arrays already in hand — identical output,
+     * same machinery (each array is wrapped in a source that returns it). Holding every photo at once
+     * is what it costs; for a photo-heavy export pass [PdfImageSource]s instead.
+     */
+    fun photoGrid(photos: List<ByteArray>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, fit: PhotoFit = PhotoFit.Cover) {
+        photoGrid(photos.map { bytes -> PdfImageSource { bytes } }, perRow, cellHeight, gap, fit)
     }
 
     /** A table with weighted columns, a repeating header, body rows and bold total rows.
@@ -286,6 +325,10 @@ class PdfDocumentSpec internal constructor(
     /**
      * Renders to PDF bytes using the supplied Regular + Bold TrueType fonts.
      *
+     * The result is one contiguous array, so peak memory includes the whole file. For a photo-heavy
+     * export prefer [renderTo], which writes the identical bytes straight to a destination — and pair
+     * it with [PdfImageSource] photos so they are pulled one at a time as well.
+     *
      * Fonts are supplied by the caller (the application), not bundled in the library: the app picks
      * a default and can let the user choose another, then passes the chosen face bytes here. This
      * keeps the engine font-agnostic and dependency-free, and works identically on every platform
@@ -318,6 +361,43 @@ class PdfDocumentSpec internal constructor(
         // global indices the layout emitted (baseImageIndex + local) line up with this combined list.
         val allImages = if (book.emojiImages.isEmpty()) images else images + book.emojiImages
         return serializePdf(pages, book, allImages, onProgress)
+    }
+
+    /**
+     * Streaming twin of [render]: writes the **byte-for-byte identical** PDF into [sink] instead of
+     * returning one array, so the document is never assembled into a single contiguous file-sized
+     * allocation.
+     *
+     * Together with [PdfImageSource] this makes document size stop mattering. Two things scale with a
+     * photo report — the photos and the finished file — and each has its own answer:
+     *  - photos supplied as [PdfImageSource]s are pulled one at a time while their object is written
+     *    and released immediately, so the *photos* never exist all at once;
+     *  - streaming means the *file* never exists all at once.
+     *
+     * Use both and peak memory is a small constant: measured at ~3.5 MiB above baseline for an
+     * 870-photo, 397 MB report, which streams in a 64 MiB heap. Photos supplied as `ByteArray`s still
+     * cost what the caller holds — the engine references those arrays rather than copying them, but it
+     * cannot release what the caller owns. The non-image objects (content streams, fonts) are built in
+     * memory either way; they are a fraction of a percent of a photo document.
+     *
+     * If [sink] throws, the exception propagates out of this call and whatever bytes were already
+     * written remain at the destination — deleting the partial output is the caller's job. The same
+     * applies to a throwing [PdfImageSource].
+     *
+     * Font, emoji and [onProgress] semantics are exactly those of [render].
+     */
+    fun renderTo(
+        sink: PdfSink,
+        regularFontBytes: ByteArray,
+        boldFontBytes: ByteArray,
+        emojiFontBytes: ByteArray? = null,
+        onProgress: ((Float) -> Unit)? = null,
+    ) {
+        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, baseImageIndex = images.size)
+        val pages = layout(this, book)
+        onProgress?.invoke(0f)
+        val allImages = if (book.emojiImages.isEmpty()) images else images + book.emojiImages
+        serializePdfTo(sink, pages, book, allImages, onProgress)
     }
 }
 

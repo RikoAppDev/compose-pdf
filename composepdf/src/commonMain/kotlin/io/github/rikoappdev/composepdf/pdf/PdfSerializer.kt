@@ -3,6 +3,8 @@ package io.github.rikoappdev.composepdf.pdf
 import io.github.rikoappdev.composepdf.FontWeight
 import io.github.rikoappdev.composepdf.HorizontalAlignment
 import io.github.rikoappdev.composepdf.PdfColor
+import io.github.rikoappdev.composepdf.PdfImageSource
+import io.github.rikoappdev.composepdf.PdfSink
 import io.github.rikoappdev.composepdf.PhotoFit
 import io.github.rikoappdev.composepdf.font.FontBook
 import io.github.rikoappdev.composepdf.render.ImageOp
@@ -21,12 +23,21 @@ internal sealed interface EmbeddedImage {
     val height: Int
 }
 
-/** A JPEG ready to embed via /DCTDecode (raw bytes, no re-encode). [components]: 1=gray, 3=RGB. */
+/**
+ * A JPEG ready to embed via /DCTDecode (raw bytes, no re-encode). [components]: 1=gray, 3=RGB.
+ *
+ * The payload is **not** held here — only its measured [sizeBytes] and the [source] it can be pulled
+ * from. That is what makes a photo-heavy document bounded in memory: the DSL reads the file once to
+ * learn `(width, height, components, size)`, drops the bytes, and the serializer pulls each photo back
+ * exactly when its object is written. A `ByteArray` handed to `image(bytes, …)` simply becomes a
+ * source that returns it, so there is one path, not two.
+ */
 internal class JpegImage(
     override val width: Int,
     override val height: Int,
     val components: Int,
-    val bytes: ByteArray,
+    val sizeBytes: Int,
+    val source: PdfImageSource,
 ) : EmbeddedImage
 
 /**
@@ -67,6 +78,32 @@ internal fun serializePdf(
     images: List<EmbeddedImage>,
     onProgress: ((Float) -> Unit)? = null,
 ): ByteArray {
+    val (doc, catalog) = buildDoc(pages, book, images, onProgress)
+    val bytes = doc.build(rootObj = catalog)
+    onProgress?.invoke(1f)
+    return bytes
+}
+
+/** Streaming twin of [serializePdf]: identical bytes, written straight into [sink]. */
+internal fun serializePdfTo(
+    sink: PdfSink,
+    pages: List<Page>,
+    book: FontBook,
+    images: List<EmbeddedImage>,
+    onProgress: ((Float) -> Unit)? = null,
+) {
+    val (doc, catalog) = buildDoc(pages, book, images, onProgress)
+    doc.writeTo(rootObj = catalog, sink = sink)
+    onProgress?.invoke(1f)
+}
+
+/** Builds the complete object list; the caller picks the transport ([PdfDoc.build] or [PdfDoc.writeTo]). */
+private fun buildDoc(
+    pages: List<Page>,
+    book: FontBook,
+    images: List<EmbeddedImage>,
+    onProgress: ((Float) -> Unit)?,
+): Pair<PdfDoc, Int> {
     val doc = PdfDoc()
     val catalog = doc.reserve()
     val pagesObj = doc.reserve()
@@ -86,13 +123,15 @@ internal fun serializePdf(
         val num = when (img) {
             is JpegImage -> {
                 val colorSpace = if (img.components == 1) "/DeviceGray" else "/DeviceRGB"
-                doc.add(
-                    streamObject(
-                        "/Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} " +
-                            "/ColorSpace $colorSpace /BitsPerComponent 8 /Filter /DCTDecode",
-                        img.bytes,
-                    )
-                )
+                // Pull the JPEG only while its object is being written, then let it go. Copying the
+                // payload into the object list doubled peak memory; holding every photo for the whole
+                // serialization made the peak proportional to the photo count. Neither happens now —
+                // the emitted bytes are identical either way, /Length comes from the measured size.
+                doc.addStreamLazy(
+                    "/Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} " +
+                        "/ColorSpace $colorSpace /BitsPerComponent 8 /Filter /DCTDecode",
+                    img.sizeBytes,
+                ) { img.source.readBytes() }
             }
             is PngImageData -> {
                 // Optional soft mask: a single-channel /DeviceGray image deflated and referenced via /SMask.
@@ -149,9 +188,7 @@ internal fun serializePdf(
     }
     doc.setDict(pagesObj, "<< /Type /Pages /Kids [${pageNums.joinToString(" ") { "$it 0 R" }}] /Count ${pageNums.size} >>")
     doc.setDict(catalog, "<< /Type /Catalog /Pages $pagesObj 0 R >>")
-    val bytes = doc.build(rootObj = catalog)
-    onProgress?.invoke(1f)
-    return bytes
+    return doc to catalog
 }
 
 private fun buildContent(
