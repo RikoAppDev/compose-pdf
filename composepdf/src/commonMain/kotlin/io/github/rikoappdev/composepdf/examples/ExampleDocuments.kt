@@ -10,6 +10,7 @@ import io.github.rikoappdev.composepdf.PdfDocumentSpec
 import io.github.rikoappdev.composepdf.PhotoFit
 import io.github.rikoappdev.composepdf.TextAlign
 import io.github.rikoappdev.composepdf.TextStyle
+import io.github.rikoappdev.composepdf.VerticalAlignment
 import io.github.rikoappdev.composepdf.dp
 import io.github.rikoappdev.composepdf.pdfDocument
 import io.github.rikoappdev.composepdf.sp
@@ -451,7 +452,7 @@ object ExampleDocuments {
     )
 
     fun fieldServiceReport(photos: List<ByteArray>): PdfDocumentSpec =
-        pdfDocument(PageConfig(margin = 36.dp, pageNumbers = true, repeatHeader = true)) {
+        pdfDocument(PageConfig(margin = 36.dp, pageNumbers = false, repeatHeader = true)) {
             header {
                 row(gap = 16.dp) {
                     cell(1f) { vector(VD_HEX_BADGE, height = 30.dp, fit = PhotoFit.Contain) }
@@ -469,7 +470,16 @@ object ExampleDocuments {
                 spacer(8.dp)
                 divider(hairline)
             }
-            footer { text("Facility Maintenance Report · WO-2026-0317", small.copy(align = TextAlign.Center)) }
+            // Page-aware footer: reads `page`, so it is rebuilt per page ("Page X of Y"). Its badge is the
+            // header's instance, so header and footer share one embedded badge on every page.
+            footer {
+                divider(hairline)
+                row(gap = 8.dp, verticalAlignment = VerticalAlignment.Center) {
+                    cell(1f) { text("Facility Maintenance Report · WO-2026-0317", small) }
+                    cell(0f) { text("Page ${page.number} of ${page.total}", small.copy(align = TextAlign.End)) }
+                    cell(0f) { vector(VD_HEX_BADGE, height = 14.dp, fit = PhotoFit.Contain) }
+                }
+            }
 
             text("Facility Maintenance Report", h1)
             text("Work order WO-2026-0317 · Reporting window: 8–12 June 2026", small)

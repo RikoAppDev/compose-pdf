@@ -31,12 +31,27 @@ class ImageAlignTest {
         return out.toByteArray()
     }
 
+    /** A solid-red JPEG five times taller than wide: contained in a tall full-width box it leaves slack. */
+    private fun redTallBar(): ByteArray {
+        val img = BufferedImage(40, 200, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = AwtColor.RED; g.fillRect(0, 0, 40, 200)
+        g.dispose()
+        val out = ByteArrayOutputStream()
+        ImageIO.write(img, "jpg", out)
+        return out.toByteArray()
+    }
+
     /** Leftmost pixel column that contains a clearly-red pixel, rendering at 72 DPI (1pt = 1px). */
     private fun leftmostRedColumn(align: HorizontalAlignment): Int {
         val doc = pdfDocument(PageConfig(margin = 36.dp)) {
             image(redSquare(), height = 40.dp, fit = PhotoFit.Contain, align = align)
         }
-        val pdf = doc.render(regular(), bold())
+        return leftmostRedColumn(doc.render(regular(), bold()))
+    }
+
+    /** Leftmost clearly-red pixel column on the first page of [pdf], rendered at 72 DPI. */
+    private fun leftmostRedColumn(pdf: ByteArray): Int {
         Loader.loadPDF(pdf).use { d ->
             val img = PDFRenderer(d).renderImageWithDPI(0, 72f)
             for (x in 0 until img.width) {
@@ -60,5 +75,17 @@ class ImageAlignTest {
         assertTrue(center in 220..340, "Center should sit mid-page (~277), was $center")
         assertTrue(end in 460..560, "End should hug the right margin (~519), was $end")
         assertTrue(start < center && center < end, "expected start < center < end, was $start/$center/$end")
+    }
+
+    @Test
+    fun imageClampedToThePageKeepsItsAlignment() {
+        // Taller than any page, so the layout clamps it to the content height (748pt here); contained,
+        // the bar is then ~150pt wide in a 523pt box. Start must still hug the left margin (~36) —
+        // centered it would start near 222.
+        val doc = pdfDocument(PageConfig(margin = 36.dp)) {
+            image(redTallBar(), height = 2000.dp, fit = PhotoFit.Contain, align = HorizontalAlignment.Start)
+        }
+        val left = leftmostRedColumn(doc.render(regular(), bold()))
+        assertTrue(left in 30..60, "a clamped Start image should hug the left margin (~36), was $left")
     }
 }

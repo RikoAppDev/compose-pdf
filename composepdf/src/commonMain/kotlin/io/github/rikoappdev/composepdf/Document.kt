@@ -2,10 +2,6 @@ package io.github.rikoappdev.composepdf
 
 import io.github.rikoappdev.composepdf.font.FontBook
 import io.github.rikoappdev.composepdf.font.TextMetrics
-import io.github.rikoappdev.composepdf.image.decodePng
-import io.github.rikoappdev.composepdf.image.isJpeg
-import io.github.rikoappdev.composepdf.image.isPng
-import io.github.rikoappdev.composepdf.image.parseJpeg
 import io.github.rikoappdev.composepdf.layout.BoxNode
 import io.github.rikoappdev.composepdf.layout.ColumnNode
 import io.github.rikoappdev.composepdf.layout.DividerNode
@@ -24,16 +20,11 @@ import io.github.rikoappdev.composepdf.layout.measure
 import io.github.rikoappdev.composepdf.layout.tableColumnWidths
 import io.github.rikoappdev.composepdf.layout.tableRowHeight
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
-import io.github.rikoappdev.composepdf.pdf.JpegImage
-import io.github.rikoappdev.composepdf.pdf.PngImageData
-import io.github.rikoappdev.composepdf.pdf.buildVectorForm
 import io.github.rikoappdev.composepdf.pdf.serializePdf
 import io.github.rikoappdev.composepdf.pdf.serializePdfTo
 import io.github.rikoappdev.composepdf.render.Page
 import io.github.rikoappdev.composepdf.render.RectOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
-import io.github.rikoappdev.composepdf.vector.isVectorXml
-import io.github.rikoappdev.composepdf.vector.parseVector
 import kotlin.jvm.JvmName
 
 enum class PageSize(val widthPt: Int, val heightPt: Int) {
@@ -46,7 +37,8 @@ class PageConfig(
     val margin: Dp = 36.dp,
     /** Auto page-number line at the bottom of every page. Its vertical space is reserved so content
      *  never overlaps it. Combine freely with a custom [ContainerScope.footer] band (footer sits
-     *  above the number). */
+     *  above the number). For custom placement (e.g. inside a footer row next to a logo) read
+     *  `page.number` / `page.total` in a page-aware header/footer and set this to `false`. */
     val pageNumbers: Boolean = true,
     val pageNumberStyle: TextStyle = TextStyle(fontSize = 8.sp, color = Color(0xFF7F807F), align = TextAlign.Center),
     /** Formats the page-number label, e.g. `{ page, total -> "Page $page of $total" }`. */
@@ -66,7 +58,7 @@ class PageConfig(
 
 /** Compose-style container: stacks children vertically. Shared by the document root, columns,
  *  box contents and row cells, so authoring reads like nested Compose. */
-open class ContainerScope internal constructor(internal val images: MutableList<EmbeddedImage>) {
+open class ContainerScope internal constructor(internal val registry: ImageRegistry) {
     internal val nodes = ArrayList<Node>()
 
     fun text(text: String, style: TextStyle = TextStyle()) { nodes.add(TextNode(text, style)) }
@@ -76,7 +68,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
     }
 
     fun column(gap: Dp = 0.dp, build: ContainerScope.() -> Unit) {
-        nodes.add(ColumnNode(ContainerScope(images).apply(build).nodes, gap.value))
+        nodes.add(ColumnNode(ContainerScope(registry).apply(build).nodes, gap.value))
     }
 
     /**
@@ -85,7 +77,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * short logo next to a taller text block.
      */
     fun row(gap: Dp = 0.dp, verticalAlignment: VerticalAlignment = VerticalAlignment.Top, build: RowScope.() -> Unit) {
-        nodes.add(RowScope(images).apply(build).toNode(gap.value, verticalAlignment))
+        nodes.add(RowScope(registry).apply(build).toNode(gap.value, verticalAlignment))
     }
 
     /** A label/value line: [label] on the left, [value] right-aligned. Common in detail reports. */
@@ -112,7 +104,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
     ) {
         nodes.add(
             BoxNode(
-                child = ColumnNode(ContainerScope(images).apply(build).nodes, 0),
+                child = ColumnNode(ContainerScope(registry).apply(build).nodes, 0),
                 paddingPt = padding.value,
                 borderPt = border.value,
                 borderColor = borderColor,
@@ -143,24 +135,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * unsupported PNG variant.
      */
     fun image(source: PdfImageSource, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover, align: HorizontalAlignment = HorizontalAlignment.Center) {
-        val index = images.size
-        // Probe read: alive only for this call. The JPEG branch keeps nothing but four numbers, so a
-        // 500-photo grid never holds more than one photo at a time.
-        val probe = source.readBytes()
-        val (iw, ih) = when {
-            isPng(probe) -> {
-                val png = decodePng(probe)
-                images.add(PngImageData(png.width, png.height, png.rgb, png.alpha))
-                png.width to png.height
-            }
-            isJpeg(probe) -> {
-                val info = parseJpeg(probe)
-                images.add(JpegImage(info.width, info.height, info.components, probe.size, source))
-                info.width to info.height
-            }
-            else -> throw IllegalArgumentException("Unsupported image format (expected JPEG or PNG)")
-        }
-        nodes.add(ImageNode(index, width.value, height.value, iw, ih, fit, align))
+        addImage(source, source, width, height, fit, align)
     }
 
     /**
@@ -170,7 +145,13 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * which lets the engine hold one photo at a time instead of all of them.
      */
     fun image(imageBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Cover, align: HorizontalAlignment = HorizontalAlignment.Center) {
-        image(PdfImageSource { imageBytes }, width, height, fit, align)
+        addImage(PdfImageSource { imageBytes }, imageBytes, width, height, fit, align)
+    }
+
+    /** Shared body of the [image] overloads; [identity] is the caller's own handle (source or bytes). */
+    private fun addImage(source: PdfImageSource, identity: Any, width: Dp, height: Dp, fit: PhotoFit, align: HorizontalAlignment) {
+        val img = registry.image(source, identity)
+        nodes.add(ImageNode(img.index, width.value, height.value, img.intrinsicW, img.intrinsicH, fit, align))
     }
 
     /**
@@ -185,11 +166,8 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * filters are not supported. Throws if the bytes aren't a recognizable VectorDrawable/SVG.
      */
     fun vector(vectorBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Contain, align: HorizontalAlignment = HorizontalAlignment.Center) {
-        require(isVectorXml(vectorBytes)) { "Not a vector image (expected VectorDrawable or SVG XML)" }
-        val form = buildVectorForm(parseVector(vectorBytes))
-        val index = images.size
-        images.add(form)
-        nodes.add(VectorNode(index, width.value, height.value, form.width, form.height, fit, align))
+        val form = registry.vector(vectorBytes)
+        nodes.add(VectorNode(form.index, width.value, height.value, form.intrinsicW, form.intrinsicH, fit, align))
     }
 
     /**
@@ -203,14 +181,7 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      */
     @JvmName("photoGridFromSources")
     fun photoGrid(photos: List<PdfImageSource>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, fit: PhotoFit = PhotoFit.Cover) {
-        require(perRow >= 1) { "photoGrid perRow must be >= 1" }
-        photos.chunked(perRow).forEachIndexed { rowIndex, chunk ->
-            if (rowIndex > 0) spacer(gap)
-            row(gap) {
-                chunk.forEach { source -> cell(1f) { image(source, width = 0.dp, height = cellHeight, fit = fit) } }
-                repeat(perRow - chunk.size) { cell(1f) {} } // pad to keep cells aligned
-            }
-        }
+        addPhotoGrid(photos.map { source -> source to source }, perRow, cellHeight, gap, fit)
     }
 
     /**
@@ -219,7 +190,21 @@ open class ContainerScope internal constructor(internal val images: MutableList<
      * is what it costs; for a photo-heavy export pass [PdfImageSource]s instead.
      */
     fun photoGrid(photos: List<ByteArray>, perRow: Int = 3, cellHeight: Dp, gap: Dp = 6.dp, fit: PhotoFit = PhotoFit.Cover) {
-        photoGrid(photos.map { bytes -> PdfImageSource { bytes } }, perRow, cellHeight, gap, fit)
+        addPhotoGrid(photos.map { bytes -> PdfImageSource { bytes } to bytes }, perRow, cellHeight, gap, fit)
+    }
+
+    /** Shared body of the [photoGrid] overloads: each photo is a (source, identity) pair, as in [addImage]. */
+    private fun addPhotoGrid(photos: List<Pair<PdfImageSource, Any>>, perRow: Int, cellHeight: Dp, gap: Dp, fit: PhotoFit) {
+        require(perRow >= 1) { "photoGrid perRow must be >= 1" }
+        photos.chunked(perRow).forEachIndexed { rowIndex, chunk ->
+            if (rowIndex > 0) spacer(gap)
+            row(gap) {
+                chunk.forEach { (source, identity) ->
+                    cell(1f) { addImage(source, identity, width = 0.dp, height = cellHeight, fit = fit, align = HorizontalAlignment.Center) }
+                }
+                repeat(perRow - chunk.size) { cell(1f) {} } // pad to keep cells aligned
+            }
+        }
     }
 
     /** A table with weighted columns, a repeating header, body rows and bold total rows.
@@ -282,7 +267,7 @@ class TableScope internal constructor(
 }
 
 /** Distributes width across weighted cells (like `Modifier.weight`). */
-class RowScope internal constructor(private val images: MutableList<EmbeddedImage>) {
+class RowScope internal constructor(private val registry: ImageRegistry) {
     private val cells = ArrayList<RowChild>()
 
     /**
@@ -292,35 +277,71 @@ class RowScope internal constructor(private val images: MutableList<EmbeddedImag
      * cell with a `cell(1f) {}` spacer to push a logo / info block to the far left or right.
      */
     fun cell(weight: Float = 1f, build: ContainerScope.() -> Unit) {
-        cells.add(RowChild(ColumnNode(ContainerScope(images).apply(build).nodes, 0), weight))
+        cells.add(RowChild(ColumnNode(ContainerScope(registry).apply(build).nodes, 0), weight))
     }
 
     internal fun toNode(gapPt: Int, valign: VerticalAlignment) = RowNode(cells.toList(), gapPt, valign)
 }
 
-class PdfContentScope internal constructor(images: MutableList<EmbeddedImage>) : ContainerScope(images) {
-    internal var headerNodes: List<Node>? = null
-    internal var footerNodes: List<Node>? = null
+class PdfContentScope internal constructor(registry: ImageRegistry) : ContainerScope(registry) {
+    internal var headerBand: Band? = null
+    internal var footerBand: Band? = null
 
-    /** A band repeated at the top of every page (e.g. a title or logo). Built once. */
-    fun header(build: ContainerScope.() -> Unit) { headerNodes = ContainerScope(images).apply(build).nodes }
+    private fun buildBand(gap: Dp, build: BandScope.() -> Unit): Band {
+        require(gap.value >= 0) { "A header/footer gap must not be negative, was ${gap.value}.dp" }
+        // The probe's images land in the document; recording them lets a page-aware band's render
+        // reuse them unread — including a logo the other, static band already embeds.
+        val probe = RecordingImageRegistry(registry)
+        val scope = BandScope(probe, PageInfo(1, 1)).apply(build)
+        return if (scope.pageRead) {
+            PageAwareBand(build, gap.value, probe.known())
+        } else {
+            StaticBand(scope.nodes, gap.value, probe.known())
+        }
+    }
 
-    /** A band repeated at the bottom of every page (above the page-number line). Built once. */
-    fun footer(build: ContainerScope.() -> Unit) { footerNodes = ContainerScope(images).apply(build).nodes }
+    /**
+     * A band repeated at the top of every page (e.g. a title or logo). [gap] (not negative) is the
+     * vertical space between the band and the content below it.
+     *
+     * A block that never reads [BandScope.page] is built once and is identical on every page. A block
+     * that reads it is page-aware: it runs again for each page, so it may run several times and with
+     * provisional page totals while pagination settles (only the final pass is drawn). Keep it free
+     * of side effects; it runs during render. Set `PageConfig.pageNumbers = false` when you render page
+     * numbers yourself. A page-aware band that adds no content on a page takes no space there.
+     * With `PageConfig.repeatHeader = false` the header appears on the first page only.
+     */
+    fun header(gap: Dp = 12.dp, build: BandScope.() -> Unit) { headerBand = buildBand(gap, build) }
+
+    /**
+     * A band repeated at the bottom of every page (above the page-number line). [gap] (not negative)
+     * is the vertical space between the content and the band. See [header] for how page-aware
+     * blocks behave; set `PageConfig.pageNumbers = false` when you render the page number inside the
+     * footer.
+     */
+    fun footer(gap: Dp = 12.dp, build: BandScope.() -> Unit) { footerBand = buildBand(gap, build) }
+
+    /** Binary-compatible entry point of the previous release; use the overload with `gap`. */
+    @Deprecated("Kept for binary compatibility", level = DeprecationLevel.HIDDEN)
+    fun header(build: ContainerScope.() -> Unit) = header(12.dp, build)
+
+    /** Binary-compatible entry point of the previous release; use the overload with `gap`. */
+    @Deprecated("Kept for binary compatibility", level = DeprecationLevel.HIDDEN)
+    fun footer(build: ContainerScope.() -> Unit) = footer(12.dp, build)
 }
 
 fun pdfDocument(config: PageConfig = PageConfig(), build: PdfContentScope.() -> Unit): PdfDocumentSpec {
     val images = ArrayList<EmbeddedImage>()
-    val scope = PdfContentScope(images).apply(build)
-    return PdfDocumentSpec(config, scope.nodes, images, scope.headerNodes, scope.footerNodes)
+    val scope = PdfContentScope(DocumentImageRegistry(images)).apply(build)
+    return PdfDocumentSpec(config, scope.nodes, images, scope.headerBand, scope.footerBand)
 }
 
 class PdfDocumentSpec internal constructor(
     internal val config: PageConfig,
     internal val nodes: List<Node>,
     internal val images: List<EmbeddedImage>,
-    internal val headerNodes: List<Node>?,
-    internal val footerNodes: List<Node>?,
+    internal val header: Band?,
+    internal val footer: Band?,
 ) {
     /**
      * Renders to PDF bytes using the supplied Regular + Bold TrueType fonts.
@@ -354,13 +375,13 @@ class PdfDocumentSpec internal constructor(
         emojiFontBytes: ByteArray? = null,
         onProgress: ((Float) -> Unit)? = null,
     ): ByteArray {
-        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, baseImageIndex = images.size)
-        val pages = layout(this, book)
+        // Emoji bitmaps discovered during layout are appended to the render's table after the
+        // document's own images, so every index the layout emits points into result.images.
+        val table = RenderImageTable(images)
+        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, imageTable = table)
+        val result = layoutDocument(this, book, table)
         onProgress?.invoke(0f)
-        // Emoji bitmaps discovered during layout are appended after the document's own images, so the
-        // global indices the layout emitted (baseImageIndex + local) line up with this combined list.
-        val allImages = if (book.emojiImages.isEmpty()) images else images + book.emojiImages
-        return serializePdf(pages, book, allImages, onProgress)
+        return serializePdf(result.pages, book, result.images, onProgress)
     }
 
     /**
@@ -393,15 +414,13 @@ class PdfDocumentSpec internal constructor(
         emojiFontBytes: ByteArray? = null,
         onProgress: ((Float) -> Unit)? = null,
     ) {
-        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, baseImageIndex = images.size)
-        val pages = layout(this, book)
+        val table = RenderImageTable(images)
+        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, imageTable = table)
+        val result = layoutDocument(this, book, table)
         onProgress?.invoke(0f)
-        val allImages = if (book.emojiImages.isEmpty()) images else images + book.emojiImages
-        serializePdfTo(sink, pages, book, allImages, onProgress)
+        serializePdfTo(sink, result.pages, book, result.images, onProgress)
     }
 }
-
-private const val BAND_GAP_PT = 12
 
 /** Don't open a box with less than this much vertical room left — avoids an empty box sliver. */
 private const val MIN_BOX_OPEN_ROOM_PT = 28
@@ -422,20 +441,21 @@ private class BoxFrame(
 /**
  * Single-pass page flow. Text and tables flow line/row-by-row; boxes and columns split across pages
  * (their border/background is redrawn per page fragment); rows and images are atomic (never split).
- * All integer math → identical placement on every platform.
+ * Each page's content area comes from [frameFor], asked once per page as the page opens, so bands
+ * may reserve a different height on every page. All integer math → identical placement on every
+ * platform.
  */
 private class Flow(
     val w: Int,
     val h: Int,
-    private val firstTopY: Int,
-    private val otherTopY: Int,
-    val usableBottom: Int,
+    private val frameFor: (pageIndex: Int) -> PageFrame,
     val book: TextMetrics,
 ) {
     val pages = ArrayList<Page>()
     var page = Page(w, h).also { pages.add(it) }
-    var topY = firstTopY   // content top on the current page (later pages may reclaim header space)
-        private set
+    private var frame = frameFor(0)
+    val topY get() = frame.topY                 // content top on the current page
+    val usableBottom get() = frame.usableBottom // content bottom on the current page
     var y = topY
     private val openBoxes = ArrayList<BoxFrame>()
     private val backgrounds = ArrayList<Triple<Int, Int, RectOp>>() // (pageIndex, depth, rect)
@@ -444,9 +464,10 @@ private class Flow(
     fun roomLeft() = usableBottom - y
 
     fun newPage() {
+        // Open box fragments close at the bottom of the page being left, before its frame changes.
         for (b in openBoxes) emitFragment(b, b.fragTop, usableBottom)
         page = Page(w, h).also { pages.add(it) }
-        topY = otherTopY
+        frame = frameFor(pages.lastIndex)
         y = topY
         for (b in openBoxes) { b.fragTop = y; y += b.padPt }
     }
@@ -483,42 +504,16 @@ private class Flow(
     }
 }
 
-internal fun layout(spec: PdfDocumentSpec, book: TextMetrics): List<Page> {
+/**
+ * One flow pass: lays [spec]'s body out into pages whose content areas come from [frameFor] (asked
+ * once per page, in page order, as each page opens). Bands are not drawn here — see [layoutDocument].
+ */
+internal fun flowBody(spec: PdfDocumentSpec, book: TextMetrics, frameFor: (pageIndex: Int) -> PageFrame): List<Page> {
     val cfg = spec.config
-    val w = cfg.size.widthPt
-    val h = cfg.size.heightPt
     val m = cfg.margin.value
-    val contentW = w - 2 * m
-
-    // Repeating bands reserve space at the top/bottom; the flow lives between them.
-    val headerP = spec.headerNodes?.let { measure(ColumnNode(it, 0), contentW, book) }
-    val footerP = spec.footerNodes?.let { measure(ColumnNode(it, 0), contentW, book) }
-    val headerReserve = headerP?.let { it.heightPt + BAND_GAP_PT } ?: 0
-    val footerH = footerP?.heightPt ?: 0
-    val pnH = if (cfg.pageNumbers) (cfg.pageNumberStyle.fontSize.value * cfg.pageNumberStyle.lineHeightMultiple).toInt() else 0
-    // Reserve the bottom band so content never overlaps the footer / page number.
-    val bottomReserve = footerH + pnH +
-        (if (footerH > 0 && pnH > 0) BAND_GAP_PT else 0) +
-        (if (footerH > 0 || pnH > 0) BAND_GAP_PT else 0)
-
-    val firstTopY = m + headerReserve
-    val otherTopY = m + (if (cfg.repeatHeader) headerReserve else 0)
-    val usableBottom = h - m - bottomReserve
-
-    val ctx = Flow(w, h, firstTopY, otherTopY, usableBottom, book)
-    for (node in spec.nodes) flowNode(node, m, contentW, ctx, cfg)
-    val pages = ctx.finish()
-
-    // Header: first page always; later pages only if it repeats.
-    for ((i, p) in pages.withIndex()) {
-        if (headerP != null && (i == 0 || cfg.repeatHeader)) headerP.place(m, m, p.ops)
-    }
-    // Footer band then the page-number line, stacked just below the content area.
-    val footerTop = usableBottom + BAND_GAP_PT
-    val pnTop = footerTop + (if (footerH > 0) footerH + (if (pnH > 0) BAND_GAP_PT else 0) else 0)
-    if (footerP != null) for (p in pages) footerP.place(m, footerTop, p.ops)
-    if (cfg.pageNumbers) addPageNumbers(pages, book, cfg, pnTop)
-    return pages
+    val ctx = Flow(cfg.size.widthPt, cfg.size.heightPt, frameFor, book)
+    for (node in spec.nodes) flowNode(node, m, cfg.size.widthPt - 2 * m, ctx, cfg)
+    return ctx.finish()
 }
 
 /** Flows a list of sibling nodes with [gapPt] between them. */
@@ -562,28 +557,23 @@ private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig
         is TableNode -> flowTable(node, x, availW, ctx, cfg)
         is RowNode, is ImageNode, is VectorNode -> {
             // Atomic — never split; move whole to the next page if it doesn't fit.
-            val usableH = ctx.usableBottom - ctx.topY
-            // An image/vector taller than a whole page can never fit; clamp it to the usable height
-            // so it doesn't draw past the page bottom into the footer. Valid documents use heights
-            // far smaller than a page, so this never triggers for them.
-            val clamped: Node? = when {
-                node is ImageNode && node.heightPt > usableH ->
-                    ImageNode(node.imageIndex, node.widthPt, usableH, node.intrinsicW, node.intrinsicH, node.fit)
-                node is VectorNode && node.heightPt > usableH ->
-                    VectorNode(node.vectorIndex, node.widthPt, usableH, node.viewportW, node.viewportH, node.fit)
-                else -> null
+            val roomBefore = ctx.usableBottom - ctx.topY
+            val natural = measure(node, availW, ctx.book)
+            if (ctx.y + natural.heightPt > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
+            // An image/vector taller than the content area can never fit; clamp it so it doesn't draw
+            // past the page bottom into the footer. The page it landed on may have less room than the
+            // one it left (page-aware bands), hence the smaller of the two — without page-aware bands
+            // the next page never has less, so this is the old clamp. Valid documents use heights far
+            // smaller than a page, so this never triggers for them. A row cannot shrink: one taller
+            // than the content area overflows that page's bottom, as it always has.
+            val room = minOf(roomBefore, ctx.usableBottom - ctx.topY)
+            val p = when {
+                node is ImageNode && node.heightPt > room -> measure(node.withHeight(room), availW, ctx.book)
+                node is VectorNode && node.heightPt > room -> measure(node.withHeight(room), availW, ctx.book)
+                else -> natural
             }
-            if (clamped != null) {
-                if (ctx.y > ctx.topY) ctx.newPage()
-                val p = measure(clamped, availW, ctx.book)
-                p.place(x, ctx.y, ctx.page.ops)
-                ctx.y += p.heightPt
-            } else {
-                val p = measure(node, availW, ctx.book)
-                if (ctx.y + p.heightPt > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
-                p.place(x, ctx.y, ctx.page.ops)
-                ctx.y += p.heightPt
-            }
+            p.place(x, ctx.y, ctx.page.ops)
+            ctx.y += p.heightPt
         }
     }
 }
@@ -633,25 +623,5 @@ private fun flowTable(node: TableNode, x: Int, availW: Int, ctx: Flow, cfg: Page
         }
         drawTableRow(row.cells, row.style, aligns, x, ctx.y, rh, colWidths, node.cellPadHPt, node.cellPadVPt, row.background, node.gridColor, ctx.book, ctx.page.ops)
         ctx.y += rh
-    }
-}
-
-private fun addPageNumbers(pages: List<Page>, book: TextMetrics, cfg: PageConfig, topYForNumber: Int) {
-    val style = cfg.pageNumberStyle
-    val fs = style.fontSize.value
-    val weight = style.fontWeight
-    val m = cfg.margin.value
-    val ascent = book.ascentPt(weight, fs)
-    val total = pages.size
-    for ((i, p) in pages.withIndex()) {
-        val label = cfg.pageNumberFormat(i + 1, total)
-        val tw = book.measureWidthPt(label, weight, fs)
-        val contentW = p.widthPt - 2 * m
-        val x = when (style.align) {
-            TextAlign.Start -> m
-            TextAlign.Center -> m + (contentW - tw) / 2
-            TextAlign.End -> m + (contentW - tw)
-        }
-        book.placeLine(label, weight, fs, style.color, x, topYForNumber + ascent, p.ops)
     }
 }

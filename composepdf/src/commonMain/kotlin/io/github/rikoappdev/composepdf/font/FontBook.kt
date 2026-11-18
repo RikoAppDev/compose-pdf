@@ -3,6 +3,7 @@ package io.github.rikoappdev.composepdf.font
 import io.github.rikoappdev.composepdf.FontWeight
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PhotoFit
+import io.github.rikoappdev.composepdf.RenderImageTable
 import io.github.rikoappdev.composepdf.image.decodePng
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
 import io.github.rikoappdev.composepdf.pdf.PngImageData
@@ -18,15 +19,15 @@ import io.github.rikoappdev.composepdf.util.toCodePoints
  * An optional **color-emoji face** ([emojiBytes], an Apple `sbix` or Noto `CBLC`/`CBDT` font) acts as
  * a fallback: code points the text faces can't render but the emoji face can are drawn as inline color
  * **bitmap images** instead of `.notdef` boxes. Each distinct emoji glyph is decoded once into an
- * [EmbeddedImage] (accumulated in [emojiImages]); the layout places it with an [ImageOp]. When no emoji
+ * [EmbeddedImage] appended to [imageTable]; the layout places it with an [ImageOp]. When no emoji
  * face is supplied the shaping/measurement/placement paths are byte-for-byte identical to before.
  */
 internal class FontBook(
     regularBytes: ByteArray,
     boldBytes: ByteArray,
     emojiBytes: ByteArray? = null,
-    /** Index in the final image list at which [emojiImages] begin (= the document's own image count). */
-    private val baseImageIndex: Int = 0,
+    /** The render's image table: emoji bitmaps are appended to it, in discovery order. */
+    private val imageTable: RenderImageTable = RenderImageTable(emptyList()),
 ) : TextMetrics {
 
     val regular = TrueTypeFont(regularBytes)
@@ -42,9 +43,7 @@ internal class FontBook(
     val gidToCpRegular = HashMap<Int, Int>()
     val gidToCpBold = HashMap<Int, Int>()
 
-    /** Color-emoji bitmaps discovered during placement, in discovery order (deduped per emoji glyph). */
-    val emojiImages = ArrayList<EmbeddedImage>()
-    private val emojiGlobalIndex = HashMap<Int, EmojiImg>() // emoji gid -> placed image
+    private val emojiGlobalIndex = HashMap<Int, EmojiImg>() // emoji gid -> placed image (deduped per glyph)
 
     private class EmojiImg(val globalIndex: Int, val intrinsicW: Int, val intrinsicH: Int)
 
@@ -164,8 +163,8 @@ internal class FontBook(
     private fun emojiImage(gid: Int): EmojiImg? = emojiGlobalIndex.getOrPut(gid) {
         val png = emoji!!.colorPng(gid) ?: return null
         val decoded = runCatching { decodePng(png) }.getOrNull() ?: return null
-        emojiImages.add(PngImageData(decoded.width, decoded.height, decoded.rgb, decoded.alpha))
-        EmojiImg(baseImageIndex + emojiImages.size - 1, decoded.width, decoded.height)
+        val index = imageTable.add(PngImageData(decoded.width, decoded.height, decoded.rgb, decoded.alpha))
+        EmojiImg(index, decoded.width, decoded.height)
     }
 
     // --- emoji classification --------------------------------------------------------------------

@@ -22,6 +22,14 @@ package io.github.rikoappdev.composepdf
  * vector images are still decoded eagerly at DSL time (see `image`), so their source is read once and
  * the decoded pixels are what the spec holds.
  *
+ * These read counts hold for the document body and for **static** header/footer bands. Inside a
+ * **page-aware** band (one that reads `BandScope.page`) an image is read (and, for PNG/vector,
+ * decoded) when the band is first built in a render, unless that same [PdfImageSource] / `ByteArray`
+ * instance was already seen (the build-time probe counts as seen); a lambda that creates a new source
+ * on every run therefore re-reads it. Hoist the bytes or source out of the band lambda. The registry
+ * that deduplicates band images keeps the raw bytes of each distinct band image for the duration of
+ * layout: fine for a logo, not for a different large photo on every page.
+ *
  * **Determinism is a hard requirement.** Every [readBytes] call must return the *same* bytes.
  * The engine measures the payload once and emits `/Length` and the cross-reference offsets from that
  * measurement before the payload is written, so a source that changes between reads would desynchronize

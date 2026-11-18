@@ -51,7 +51,10 @@ internal class ImageOp(
     val fit: PhotoFit,
     /** Horizontal placement of the fitted image inside its box (Start/Center/End). */
     val align: HorizontalAlignment = HorizontalAlignment.Center,
-) : DrawOp
+) : DrawOp {
+    /** This op drawing image [index] instead; every other field is kept. */
+    fun withImageIndex(index: Int) = ImageOp(xPt, yPt, wPt, hPt, index, intrinsicW, intrinsicH, fit, align)
+}
 
 /**
  * Draws vector form XObject [imageIndex] into the box at (x, y). [intrinsicW]/[intrinsicH] are the
@@ -69,7 +72,10 @@ internal class VectorOp(
     val fit: PhotoFit,
     /** Horizontal placement of the fitted vector inside its box (Start/Center/End). */
     val align: HorizontalAlignment = HorizontalAlignment.Center,
-) : DrawOp
+) : DrawOp {
+    /** This op drawing form [index] instead; every other field is kept. */
+    fun withImageIndex(index: Int) = VectorOp(xPt, yPt, wPt, hPt, index, intrinsicW, intrinsicH, fit, align)
+}
 
 internal class Page(val widthPt: Int, val heightPt: Int) {
     val ops = ArrayList<DrawOp>()

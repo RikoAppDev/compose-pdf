@@ -51,6 +51,7 @@
     <span class="pill">Type0 / Identity-H · selectable text</span>
     <span class="pill">Automatic pagination</span>
     <span class="pill">Tables · boxes · rows</span>
+    <span class="pill">Page-aware header &amp; footer</span>
     <span class="pill">JPEG + PNG images</span>
     <span class="pill">SVG + VectorDrawable import</span>
     <span class="pill">Color emoji · sbix / CBDT</span>
@@ -83,18 +84,18 @@
   const RAW  = "https://raw.githubusercontent.com/RikoAppDev/compose-pdf/main";
   const CODE = REPO + "/composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt";
   const samples = [
-    ["Field service report","field-service-report",453,5,"Repeating header (VectorDrawable badge) + footer + page numbers, bordered record cards with 3-column summaries, photo grid and signatures."],
-    ["Annual report","annual-report",598,5,"Title + metric cards, a 120-row ledger with a repeating header, zebra striping, periodic subtotals and a grand total."],
-    ["Product catalogue","product-catalog",667,3,"SVG brand mark in the header, categorized tables interleaved with photo grids."],
-    ["Service agreement","service-agreement",758,6,"16 numbered sections of long wrapped paragraphs (keep-together) and a signatures block."],
-    ["Invoice","invoice",78,1,"Weighted header columns, a line-item table and stacked totals."],
-    ["Business letter","business-letter",155,1,"Letterhead and automatically wrapped body paragraphs."],
-    ["Price list","price-list",205,2,"Repeating header band and multiple categorized tables."],
-    ["Status report","status-report",268,1,"Summary box, metric cards and a milestones table."],
-    ["Transaction ledger","transaction-ledger",344,3,"90 rows over three pages, auto-paginated with a repeating table header and page numbers."],
-    ["Photo gallery","photo-gallery",391,1,"Mixed aspect ratios laid out with PhotoFit.Smart / Contain."],
-    ["Résumé","resume",833,1,"Weighted two-column CV, section headings and a skills table."],
-    ["Event program","event-program",919,1,"Header band and agenda schedule tables."],
+    ["Field service report","field-service-report",454,5,"Repeating header (VectorDrawable badge) + page-aware footer (Page X of Y + badge), bordered record cards with 3-column summaries, photo grid and signatures."],
+    ["Annual report","annual-report",607,5,"Title + metric cards, a 120-row ledger with a repeating header, zebra striping, periodic subtotals and a grand total."],
+    ["Product catalogue","product-catalog",676,3,"SVG brand mark in the header, categorized tables interleaved with photo grids."],
+    ["Service agreement","service-agreement",767,6,"16 numbered sections of long wrapped paragraphs (keep-together) and a signatures block."],
+    ["Invoice","invoice",79,1,"Weighted header columns, a line-item table and stacked totals."],
+    ["Business letter","business-letter",156,1,"Letterhead and automatically wrapped body paragraphs."],
+    ["Price list","price-list",206,2,"Repeating header band and multiple categorized tables."],
+    ["Status report","status-report",269,1,"Summary box, metric cards and a milestones table."],
+    ["Transaction ledger","transaction-ledger",345,3,"90 rows over three pages, auto-paginated with a repeating table header and page numbers."],
+    ["Photo gallery","photo-gallery",392,1,"Mixed aspect ratios laid out with PhotoFit.Smart / Contain."],
+    ["Résumé","resume",842,1,"Weighted two-column CV, section headings and a skills table."],
+    ["Event program","event-program",928,1,"Header band and agenda schedule tables."],
   ];
   document.getElementById("grid").innerHTML = samples.map(([name,file,line,pages,desc]) => `
     <article class="card">

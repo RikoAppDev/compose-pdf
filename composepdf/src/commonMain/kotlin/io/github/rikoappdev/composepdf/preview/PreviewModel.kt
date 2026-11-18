@@ -4,8 +4,9 @@ import io.github.rikoappdev.composepdf.HorizontalAlignment
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PdfDocumentSpec
 import io.github.rikoappdev.composepdf.PhotoFit
+import io.github.rikoappdev.composepdf.RenderImageTable
 import io.github.rikoappdev.composepdf.font.FontBook
-import io.github.rikoappdev.composepdf.layout
+import io.github.rikoappdev.composepdf.layoutDocument
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
 import io.github.rikoappdev.composepdf.pdf.JpegImage
 import io.github.rikoappdev.composepdf.pdf.PngImageData
@@ -129,10 +130,11 @@ fun PdfDocumentSpec.previewPages(
     regularFontBytes: ByteArray,
     boldFontBytes: ByteArray,
 ): List<PreviewPage> {
-    val book = FontBook(regularFontBytes, boldFontBytes)
-    val pages = layout(this, book)
-    val images = this.images
-    return pages.map { page ->
+    val table = RenderImageTable(this.images)
+    val book = FontBook(regularFontBytes, boldFontBytes, imageTable = table)
+    val result = layoutDocument(this, book, table)
+    val images = result.images
+    return result.pages.map { page ->
         val ops = ArrayList<PreviewOp>(page.ops.size)
         for (op in page.ops) when (op) {
             is TextOp -> ops.add(op.toPreview(book))

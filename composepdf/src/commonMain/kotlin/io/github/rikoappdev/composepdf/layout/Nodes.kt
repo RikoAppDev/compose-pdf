@@ -20,7 +20,10 @@ internal class ImageNode(
     val intrinsicH: Int,
     val fit: PhotoFit,
     val align: HorizontalAlignment = HorizontalAlignment.Center,
-) : Node
+) : Node {
+    /** This image with box height [heightPt]; every other field is kept. */
+    fun withHeight(heightPt: Int) = ImageNode(imageIndex, widthPt, heightPt, intrinsicW, intrinsicH, fit, align)
+}
 internal class VectorNode(
     val vectorIndex: Int,
     val widthPt: Int,   // 0 = fill available width
@@ -29,7 +32,10 @@ internal class VectorNode(
     val viewportH: Int,
     val fit: PhotoFit,
     val align: HorizontalAlignment = HorizontalAlignment.Center,
-) : Node
+) : Node {
+    /** This vector with box height [heightPt]; every other field is kept. */
+    fun withHeight(heightPt: Int) = VectorNode(vectorIndex, widthPt, heightPt, viewportW, viewportH, fit, align)
+}
 internal class ColumnNode(val children: List<Node>, val gapPt: Int) : Node
 internal class RowChild(val node: Node, val weight: Float)
 internal class RowNode(

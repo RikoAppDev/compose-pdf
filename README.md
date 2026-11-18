@@ -26,7 +26,7 @@ to users.
 - Embedded **subset Type0/CIDFontType2 (Identity-H) + ToUnicode** → selectable & searchable text, including Latin diacritics (composite glyphs subset correctly).
 - **Compose-style DSL**: `text`, `spacer`, `divider`, `row(verticalAlignment) { cell(weight) { } }` (a `cell(0f)` shrinks to its content's width — pair it with a `cell(1f) {}` spacer to push a logo / info block to an edge; `verticalAlignment` centres a short cell against a taller one), `column`, `box(padding, border, background)`, `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through **and PNG** — decoded in pure Kotlin to a `/FlateDecode` image with an `/SMask` for transparency; `PhotoFit.Cover` / `Contain` / `Smart` — smart preserves aspect but crops extreme strips; `align = HorizontalAlignment.Start` left-aligns a contained logo in a wide cell; both take a [`PdfImageSource`](#unbounded-documents-lazy-image-sources--renderto) instead of bytes to keep photo-heavy documents bounded), `table` (weighted columns, repeating header, total rows, optional `zebra` striping).
 - **Vector images (SVG + Android VectorDrawable)**: `vector(bytes, …)` imports both formats (auto-detected) into native, resolution-independent PDF **vector paths** — the full SVG/VectorDrawable path grammar (incl. elliptical arcs), basic shapes (`rect`/`circle`/`ellipse`/`line`/`poly…`), `<group>`/`transform`, nonzero & even-odd fill, stroke, per-element opacity, `currentColor` and the full CSS named-color set. Embedded as a reusable **Form XObject**, so a logo repeated in a header costs a single object. `align` (like `image`) left/center/right-aligns the logo inside its cell. Pure-Kotlin, dependency-free (no XML library).
-- **Header / footer / page numbers**: repeating `header`/`footer` bands and an auto page-number line whose space is reserved (content never overlaps it). `PageConfig` controls it all — `repeatHeader` (every page vs. first page only, like a title block), `pageNumberFormat`, `pageNumberStyle`, `pageNumbers`.
+- **Header / footer / page numbers**: repeating `header`/`footer` bands and an auto page-number line whose space is reserved (content never overlaps it). Bands can be **page-aware**: read `page.number` / `page.total` / `page.isFirst` / `page.isLast` anywhere inside the block ("Page 3 / 12" next to a logo, a different first-page header, a last-page signature row); band height may differ per page, `gap` sets the band-to-content spacing. `PageConfig` controls the rest — `repeatHeader` (every page vs. first page only, like a title block), `pageNumberFormat`, `pageNumberStyle`, `pageNumbers`. See [Page-aware header & footer](#page-aware-header--footer).
 - Familiar value types: `TextStyle` (with `copy`), `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight`, `TextAlign`.
 - **Automatic pagination**: paragraphs split by line; tables split by row (repeating the header); bordered **boxes and columns split across pages** with the border/background redrawn per fragment; rows and images stay atomic (never cut). Optional keep-together moves a block whole instead of leaving a sliver.
 - **Color emoji**: pass an optional emoji font (`render(regular, bold, emoji)`) and emoji render as inline color bitmaps from `sbix` / `CBLC`+`CBDT` faces (the "phone" look) — see [Color emoji](#color-emoji). Opt-in; omit it and output is unchanged.
@@ -46,6 +46,46 @@ val pdf: ByteArray = pdfDocument(PageConfig(margin = 36.dp)) {
 }.render(regularFontBytes, boldFontBytes)
 ```
 
+## Page-aware header & footer
+
+A `header { }` / `footer { }` block that never touches `page` is built once and is identical on every
+page. Reading `page` anywhere inside the block (nested `row` / `cell` / `box` included) makes the band
+page-aware: it is rebuilt for each page once the total is known.
+
+```kotlin
+// titleBlock() / runningHeader() are your own ContainerScope helpers; logoSvgBytes is your logo's SVG bytes.
+val doc = pdfDocument(PageConfig(margin = 36.dp, pageNumbers = false)) {
+    header { if (page.isFirst) titleBlock() else runningHeader() }
+    footer(gap = 12.dp) {
+        divider()
+        row(verticalAlignment = VerticalAlignment.Center) {
+            cell(1f) { text("Contoso Field Reports"); text("Prepared by the field team") }
+            cell(0f) { text("Report ID 12345 · Page ${page.number} / ${page.total}") }
+            cell(0f) { vector(logoSvgBytes, width = 48.dp, height = 14.dp) }
+        }
+    }
+    // ... body ...
+}
+```
+
+- `page` is a `PageInfo`: `number` (1-based), `total`, `isFirst`, `isLast`; user code always sees `1 <= number <= total`.
+- Band height may differ per page; content never overlaps a band. A page-aware band that adds nothing on a
+  page (e.g. `if (page.isFirst) ...`) takes no space there. `repeatHeader = false` still means page 1 only.
+- The lambda may run several times (once at build, then per page), with **provisional totals** while
+  pagination settles - only the final pass is drawn - so keep it free of side effects.
+- A logo (raster or vector) is embedded once, not once per page - also when the same instance sits in a static
+  header and a page-aware footer. Hoist its bytes / `PdfImageSource` out of
+  the lambda so it is not re-read; the dedupe registry keeps the bytes of each distinct band image during layout.
+- Set `PageConfig.pageNumbers = false` when you draw the numbers yourself. `gap` (default 12 dp, not negative)
+  is the spacing between the band and the content.
+- Reusable band helpers: write them as `fun ContainerScope.pageLabel(page: PageInfo) { ... }` and call
+  `pageLabel(page)` - that works at any depth. A `fun BandScope.pageLabel()` extension called inside a nested
+  `cell { }` / `column { }` / `box { }` resolves against the band, not the cell, so its content escapes the
+  cell; call `BandScope` extensions only at the top level of the band block.
+- Inside `header`/`footer` blocks a *member or top-level* symbol of your own named `page` is shadowed by
+  `BandScope.page`; locals and parameters named `page` still win (and a band that then never reads
+  `BandScope.page` stays static).
+
 ## Gallery
 
 A set of ready-made example documents ships in `commonMain` under
@@ -63,12 +103,12 @@ the catalogue an **SVG**.
 
 | | |
 |---|---|
-| **Field service report** — repeating header (VectorDrawable badge) + footer + page numbers, bordered record cards with 3-column summaries, totals, photo grid &amp; signatures; **5 pages**.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L453) · [PDF](samples/field-service-report.pdf)<br><a href="samples/field-service-report.pdf"><img src="samples/field-service-report.png" width="330" alt="Field service report example"></a> | **Annual report** — title + metric cards, 120-row ledger with a repeating header, zebra striping, periodic subtotals and a grand total; **5 pages**.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L598) · [PDF](samples/annual-report.pdf)<br><a href="samples/annual-report.pdf"><img src="samples/annual-report.png" width="330" alt="Annual report example"></a> |
-| **Product catalogue** — SVG brand mark in the header, categorized tables interleaved with photo grids; **3 pages**.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L667) · [PDF](samples/product-catalog.pdf)<br><a href="samples/product-catalog.pdf"><img src="samples/product-catalog.png" width="330" alt="Product catalogue example"></a> | **Service agreement** — 16 numbered sections of wrapped paragraphs (keep-together) + a signatures block; **6 pages**.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L758) · [PDF](samples/service-agreement.pdf)<br><a href="samples/service-agreement.pdf"><img src="samples/service-agreement.png" width="330" alt="Service agreement example"></a> |
-| **Invoice** — weighted header columns, line-item table, stacked totals.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L78) · [PDF](samples/invoice.pdf)<br><a href="samples/invoice.pdf"><img src="samples/invoice.png" width="330" alt="Invoice example"></a> | **Business letter** — letterhead and automatically wrapped body paragraphs.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L155) · [PDF](samples/business-letter.pdf)<br><a href="samples/business-letter.pdf"><img src="samples/business-letter.png" width="330" alt="Business letter example"></a> |
-| **Price list** — repeating header band, multiple categorized tables.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L205) · [PDF](samples/price-list.pdf)<br><a href="samples/price-list.pdf"><img src="samples/price-list.png" width="330" alt="Price list example"></a> | **Status report** — summary box, metric cards, milestones table.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L268) · [PDF](samples/status-report.pdf)<br><a href="samples/status-report.pdf"><img src="samples/status-report.png" width="330" alt="Status report example"></a> |
-| **Transaction ledger** — 90 rows over **3 pages**, repeating table header + page numbers.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L344) · [PDF](samples/transaction-ledger.pdf)<br><a href="samples/transaction-ledger.pdf"><img src="samples/transaction-ledger.png" width="330" alt="Transaction ledger example"></a> | **Photo gallery** — mixed aspect ratios laid out with `PhotoFit.Smart` / `Contain`.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L391) · [PDF](samples/photo-gallery.pdf)<br><a href="samples/photo-gallery.pdf"><img src="samples/photo-gallery.png" width="330" alt="Photo gallery example"></a> |
-| **Résumé** — weighted two-column CV, section headings, a skills table; 1 page.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L833) · [PDF](samples/resume.pdf)<br><a href="samples/resume.pdf"><img src="samples/resume.png" width="330" alt="Résumé example"></a> | **Event program** — header band + agenda schedule tables; 1 page.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L919) · [PDF](samples/event-program.pdf)<br><a href="samples/event-program.pdf"><img src="samples/event-program.png" width="330" alt="Event program example"></a> |
+| **Field service report** — repeating header (VectorDrawable badge) + page-aware footer ("Page X of Y" + badge), bordered record cards with 3-column summaries, totals, photo grid &amp; signatures; **5 pages**.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L454) · [PDF](samples/field-service-report.pdf)<br><a href="samples/field-service-report.pdf"><img src="samples/field-service-report.png" width="330" alt="Field service report example"></a> | **Annual report** — title + metric cards, 120-row ledger with a repeating header, zebra striping, periodic subtotals and a grand total; **5 pages**.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L607) · [PDF](samples/annual-report.pdf)<br><a href="samples/annual-report.pdf"><img src="samples/annual-report.png" width="330" alt="Annual report example"></a> |
+| **Product catalogue** — SVG brand mark in the header, categorized tables interleaved with photo grids; **3 pages**.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L676) · [PDF](samples/product-catalog.pdf)<br><a href="samples/product-catalog.pdf"><img src="samples/product-catalog.png" width="330" alt="Product catalogue example"></a> | **Service agreement** — 16 numbered sections of wrapped paragraphs (keep-together) + a signatures block; **6 pages**.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L767) · [PDF](samples/service-agreement.pdf)<br><a href="samples/service-agreement.pdf"><img src="samples/service-agreement.png" width="330" alt="Service agreement example"></a> |
+| **Invoice** — weighted header columns, line-item table, stacked totals.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L79) · [PDF](samples/invoice.pdf)<br><a href="samples/invoice.pdf"><img src="samples/invoice.png" width="330" alt="Invoice example"></a> | **Business letter** — letterhead and automatically wrapped body paragraphs.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L156) · [PDF](samples/business-letter.pdf)<br><a href="samples/business-letter.pdf"><img src="samples/business-letter.png" width="330" alt="Business letter example"></a> |
+| **Price list** — repeating header band, multiple categorized tables.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L206) · [PDF](samples/price-list.pdf)<br><a href="samples/price-list.pdf"><img src="samples/price-list.png" width="330" alt="Price list example"></a> | **Status report** — summary box, metric cards, milestones table.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L269) · [PDF](samples/status-report.pdf)<br><a href="samples/status-report.pdf"><img src="samples/status-report.png" width="330" alt="Status report example"></a> |
+| **Transaction ledger** — 90 rows over **3 pages**, repeating table header + page numbers.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L345) · [PDF](samples/transaction-ledger.pdf)<br><a href="samples/transaction-ledger.pdf"><img src="samples/transaction-ledger.png" width="330" alt="Transaction ledger example"></a> | **Photo gallery** — mixed aspect ratios laid out with `PhotoFit.Smart` / `Contain`.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L392) · [PDF](samples/photo-gallery.pdf)<br><a href="samples/photo-gallery.pdf"><img src="samples/photo-gallery.png" width="330" alt="Photo gallery example"></a> |
+| **Résumé** — weighted two-column CV, section headings, a skills table; 1 page.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L842) · [PDF](samples/resume.pdf)<br><a href="samples/resume.pdf"><img src="samples/resume.png" width="330" alt="Résumé example"></a> | **Event program** — header band + agenda schedule tables; 1 page.<br>[code](composepdf/src/commonMain/kotlin/io/github/rikoappdev/composepdf/examples/ExampleDocuments.kt#L928) · [PDF](samples/event-program.pdf)<br><a href="samples/event-program.pdf"><img src="samples/event-program.png" width="330" alt="Event program example"></a> |
 
 ## Live preview (design-time `@Preview`)
 
@@ -218,3 +258,4 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 - Complex scripts / RTL / bidi.
 - Color **vector** emoji (`COLR`/`CPAL`) and ZWJ / skin-tone sequences.
 - Long-word breaking inside narrow columns.
+- Full-bleed bands (edge-to-edge colour bars), a band distance from the page edge different from `margin`, and separate top / bottom / left / right margins.
