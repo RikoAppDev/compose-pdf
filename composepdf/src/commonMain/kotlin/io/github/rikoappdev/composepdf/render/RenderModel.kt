@@ -7,32 +7,32 @@ import io.github.rikoappdev.composepdf.HorizontalAlignment
 
 /**
  * Low-level positioned draw operations produced by the layout engine and consumed by the
- * serializer. Coordinates use a **top-left origin in PDF points** (y grows downward); the
- * serializer flips to PDF's bottom-left origin. Keeping ops integer + absolute is what makes
- * output identical across platforms.
+ * serializer. Coordinates use a **top-left origin**, in **millipoints** (1 pt = 1000 mpt; y grows
+ * downward); the serializer flips to PDF's bottom-left origin. Keeping ops integer (fixed point) +
+ * absolute is what makes output identical across platforms.
  */
 internal sealed interface DrawOp
 
 /** A run of already-shaped glyphs drawn with its baseline at (x, baselineY). */
 internal class TextOp(
-    val xPt: Int,
-    val baselineYPt: Int,
+    val xMpt: Int,
+    val baselineYMpt: Int,
     val gids: IntArray,
     val weight: FontWeight,
-    val fontSizePt: Int,
+    val fontSizeMpt: Int,
     val color: PdfColor,
 ) : DrawOp
 
-/** A filled and/or stroked rectangle. Top-left at (x, y). [cornerRadiusPt] > 0 rounds the corners. */
+/** A filled and/or stroked rectangle. Top-left at (x, y). [cornerRadiusMpt] > 0 rounds the corners. */
 internal class RectOp(
-    val xPt: Int,
-    val yPt: Int,
-    val wPt: Int,
-    val hPt: Int,
+    val xMpt: Int,
+    val yMpt: Int,
+    val wMpt: Int,
+    val hMpt: Int,
     val fill: PdfColor?,
     val stroke: PdfColor?,
-    val strokeWidthPt: Int,
-    val cornerRadiusPt: Int = 0,
+    val strokeWidthMpt: Int,
+    val cornerRadiusMpt: Int = 0,
 ) : DrawOp
 
 /**
@@ -41,10 +41,10 @@ internal class RectOp(
  * extreme aspect would shrink it to a sliver).
  */
 internal class ImageOp(
-    val xPt: Int,
-    val yPt: Int,
-    val wPt: Int,
-    val hPt: Int,
+    val xMpt: Int,
+    val yMpt: Int,
+    val wMpt: Int,
+    val hMpt: Int,
     val imageIndex: Int,
     val intrinsicW: Int,
     val intrinsicH: Int,
@@ -53,7 +53,7 @@ internal class ImageOp(
     val align: HorizontalAlignment = HorizontalAlignment.Center,
 ) : DrawOp {
     /** This op drawing image [index] instead; every other field is kept. */
-    fun withImageIndex(index: Int) = ImageOp(xPt, yPt, wPt, hPt, index, intrinsicW, intrinsicH, fit, align)
+    fun withImageIndex(index: Int) = ImageOp(xMpt, yMpt, wMpt, hMpt, index, intrinsicW, intrinsicH, fit, align)
 }
 
 /**
@@ -62,10 +62,10 @@ internal class ImageOp(
  * the form's BBox (viewport) to the chosen draw size.
  */
 internal class VectorOp(
-    val xPt: Int,
-    val yPt: Int,
-    val wPt: Int,
-    val hPt: Int,
+    val xMpt: Int,
+    val yMpt: Int,
+    val wMpt: Int,
+    val hMpt: Int,
     val imageIndex: Int,
     val intrinsicW: Int,
     val intrinsicH: Int,
@@ -74,9 +74,10 @@ internal class VectorOp(
     val align: HorizontalAlignment = HorizontalAlignment.Center,
 ) : DrawOp {
     /** This op drawing form [index] instead; every other field is kept. */
-    fun withImageIndex(index: Int) = VectorOp(xPt, yPt, wPt, hPt, index, intrinsicW, intrinsicH, fit, align)
+    fun withImageIndex(index: Int) = VectorOp(xMpt, yMpt, wMpt, hMpt, index, intrinsicW, intrinsicH, fit, align)
 }
 
+/** A page; its size stays in whole points (the MediaBox), its ops are in millipoints. */
 internal class Page(val widthPt: Int, val heightPt: Int) {
     val ops = ArrayList<DrawOp>()
 }

@@ -8,13 +8,13 @@ import io.github.rikoappdev.composepdf.layout.measure
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
 import io.github.rikoappdev.composepdf.render.Page
 
-/** The default band ↔ content gap, and the fixed gap between the footer and the page-number line. */
-private const val BAND_GAP_PT = 12
+/** The default band ↔ content gap, and the fixed gap between the footer and the page-number line: 12 pt. */
+private const val BAND_GAP_MPT = 12 * MPT_PER_PT
 
 /** Safety cap on flow passes while a page-aware document's page count settles. */
 private const val MAX_SETTLE_PASSES = 50
 
-/** The content area of one page (top-left origin, points): content flows from [topY] down to [usableBottom]. */
+/** The content area of one page (top-left origin, millipoints): content flows from [topY] down to [usableBottom]. */
 internal class PageFrame(val topY: Int, val usableBottom: Int) {
     /** This frame narrowed to also lie inside [other] (`null` = no limit): each edge keeps the larger reservation. */
     fun within(other: PageFrame?): PageFrame =
@@ -82,14 +82,15 @@ private class BandBuilder(spec: PdfDocumentSpec, private val book: TextMetrics, 
     private val cfg = spec.config
     private val header = spec.header
     private val footer = spec.footer
-    private val m = cfg.margin.value
-    private val pageH = cfg.size.heightPt
-    private val contentW = cfg.size.widthPt - 2 * m
-    private val headerGap = header?.gapPt ?: BAND_GAP_PT
-    val footerGap = footer?.gapPt ?: BAND_GAP_PT
+    private val marginTop = cfg.margins.top.mpt
+    private val marginBottom = cfg.margins.bottom.mpt
+    private val pageH = cfg.size.heightPt * MPT_PER_PT
+    private val contentW = cfg.size.widthPt * MPT_PER_PT - cfg.margins.start.mpt - cfg.margins.end.mpt
+    private val headerGap = header?.gapMpt ?: BAND_GAP_MPT
+    val footerGap = footer?.gapMpt ?: BAND_GAP_MPT
 
     /** Height of the legacy page-number line; 0 when it is off. */
-    val pnH = if (cfg.pageNumbers) (cfg.pageNumberStyle.fontSize.value * cfg.pageNumberStyle.lineHeightMultiple).toInt() else 0
+    val pnH = if (cfg.pageNumbers) lineHeightMpt(cfg.pageNumberStyle.fontSize.mpt, cfg.pageNumberStyle.lineHeightMultiple) else 0
 
     val pageAware = header is PageAwareBand || footer is PageAwareBand
     private val staticHeader = (header as? StaticBand)?.let { measureBand(it.nodes) }
@@ -122,17 +123,18 @@ private class BandBuilder(spec: PdfDocumentSpec, private val book: TextMetrics, 
 
     /**
      * The content area left by [header] and [footer]. A header reserves its height plus its gap (even
-     * when it measures 0, as a static `header {}` always has). At the bottom, the stack footer → 12 pt
-     * → page-number line rests on the margin and the footer gap separates it from the content (the
-     * number line alone keeps that gap too).
+     * when it measures 0, as a static `header {}` always has) below the top margin. At the bottom, the
+     * stack footer → 12 pt → page-number line rests on the bottom margin and the footer gap separates
+     * it from the content (the number line alone keeps that gap too).
      */
     private fun frameOf(header: Placeable?, footer: Placeable?): PageFrame {
-        val top = m + (header?.let { it.heightPt + headerGap } ?: 0)
-        val footerH = footer?.heightPt ?: 0
-        val bottomReserve = footerH + pnH +
-            (if (footerH > 0 && pnH > 0) BAND_GAP_PT else 0) +
+        // Summed in Long and saturated: a band taller than `Int` leaves no room rather than wrapping.
+        val top = (marginTop.toLong() + (header?.let { it.heightMpt.toLong() + headerGap } ?: 0L)).saturatedToInt()
+        val footerH = footer?.heightMpt ?: 0
+        val bottomReserve = footerH.toLong() + pnH +
+            (if (footerH > 0 && pnH > 0) BAND_GAP_MPT else 0) +
             (if (footerH > 0 || pnH > 0) footerGap else 0)
-        return PageFrame(top, pageH - m - bottomReserve)
+        return PageFrame(top, (pageH.toLong() - marginBottom - bottomReserve).saturatedToInt())
     }
 
     /** Fails clearly instead of producing one page per element when bands leave page [index] no room. */
@@ -221,40 +223,42 @@ private fun reserve(reserved: HashMap<Int, PageFrame>, frames: List<PageFrame>) 
 
 /**
  * Draws each page's bands: the header at the top margin, then the footer and the page-number line
- * stacked down to the bottom margin. The footer sits [BandBuilder.footerGap] below the bottom of its
- * own exact frame, so it stays bottom-anchored even where a fallback reservation left more room. All
- * headers, then all footers, then all numbers — the order the single-pass layout always used, so
- * static documents keep their exact bytes.
+ * stacked down to the bottom margin, all starting at the start margin. The footer sits
+ * [BandBuilder.footerGap] below the bottom of its own exact frame, so it stays bottom-anchored even
+ * where a fallback reservation left more room. All headers, then all footers, then all numbers — the
+ * order the single-pass layout always used, so static documents keep their exact bytes.
  */
 private fun drawBands(pages: List<Page>, bands: List<PageBands>, builder: BandBuilder, book: TextMetrics, cfg: PageConfig) {
-    val m = cfg.margin.value
-    for ((i, p) in pages.withIndex()) bands[i].header?.place(m, m, p.ops)
+    val left = cfg.margins.start.mpt
+    val top = cfg.margins.top.mpt
+    for ((i, p) in pages.withIndex()) bands[i].header?.place(left, top, p.ops)
     val numberTops = IntArray(pages.size)
     for ((i, p) in pages.withIndex()) {
         val footer = bands[i].footer
-        val footerH = footer?.heightPt ?: 0
-        val footerTop = bands[i].frame.usableBottom + builder.footerGap
-        footer?.place(m, footerTop, p.ops)
-        numberTops[i] = footerTop + (if (footerH > 0) footerH + (if (builder.pnH > 0) BAND_GAP_PT else 0) else 0)
+        val footerH = footer?.heightMpt ?: 0
+        val footerTop = satAdd(bands[i].frame.usableBottom, builder.footerGap)
+        footer?.place(left, footerTop, p.ops)
+        numberTops[i] = (footerTop.toLong() + (if (footerH > 0) footerH.toLong() + (if (builder.pnH > 0) BAND_GAP_MPT else 0) else 0L)).saturatedToInt()
     }
     if (cfg.pageNumbers) addPageNumbers(pages, book, cfg, numberTops)
 }
 
 private fun addPageNumbers(pages: List<Page>, book: TextMetrics, cfg: PageConfig, topYForNumber: IntArray) {
     val style = cfg.pageNumberStyle
-    val fs = style.fontSize.value
+    val fs = style.fontSize.mpt
     val weight = style.fontWeight
-    val m = cfg.margin.value
-    val ascent = book.ascentPt(weight, fs)
+    val left = cfg.margins.start.mpt
+    val right = cfg.margins.end.mpt
+    val ascent = book.ascentMpt(weight, fs)
     val total = pages.size
     for ((i, p) in pages.withIndex()) {
         val label = cfg.pageNumberFormat(i + 1, total)
-        val tw = book.measureWidthPt(label, weight, fs)
-        val contentW = p.widthPt - 2 * m
+        val tw = book.measureWidthMpt(label, weight, fs)
+        val contentW = p.widthPt * MPT_PER_PT - left - right
         val x = when (style.align) {
-            TextAlign.Start -> m
-            TextAlign.Center -> m + (contentW - tw) / 2
-            TextAlign.End -> m + (contentW - tw)
+            TextAlign.Start -> left
+            TextAlign.Center -> left + halfTrunc(contentW - tw)
+            TextAlign.End -> left + (contentW - tw)
         }
         book.placeLine(label, weight, fs, style.color, x, topYForNumber[i] + ascent, p.ops)
     }

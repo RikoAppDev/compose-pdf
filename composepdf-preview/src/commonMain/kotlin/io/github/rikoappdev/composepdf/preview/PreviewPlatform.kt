@@ -3,8 +3,8 @@ package io.github.rikoappdev.composepdf.preview
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 
-/** Builds a Compose [FontFamily] from Regular + Bold TrueType bytes (platform font-from-bytes API). */
-internal expect fun previewFontFamily(regular: ByteArray, bold: ByteArray): FontFamily
+/** Builds a Compose [FontFamily] from Regular + Bold (+ optional Medium) TrueType bytes (platform font-from-bytes API). */
+internal expect fun previewFontFamily(regular: ByteArray, bold: ByteArray, medium: ByteArray?): FontFamily
 
 /** Decodes a [PreviewImageSource] into a Compose [ImageBitmap] using the platform image pipeline. */
 internal expect fun decodePreviewImage(source: PreviewImageSource): ImageBitmap

@@ -11,9 +11,12 @@ import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.ImageInfo
 
-internal actual fun previewFontFamily(regular: ByteArray, bold: ByteArray): FontFamily = FontFamily(
-    Font("cp-preview-regular", regular, FontWeight.Normal, FontStyle.Normal),
-    Font("cp-preview-bold", bold, FontWeight.Bold, FontStyle.Normal),
+internal actual fun previewFontFamily(regular: ByteArray, bold: ByteArray, medium: ByteArray?): FontFamily = FontFamily(
+    listOfNotNull(
+        Font("cp-preview-regular", regular, FontWeight.Normal, FontStyle.Normal),
+        Font("cp-preview-bold", bold, FontWeight.Bold, FontStyle.Normal),
+        medium?.let { Font("cp-preview-medium", it, FontWeight.Medium, FontStyle.Normal) },
+    ),
 )
 
 internal actual fun decodePreviewImage(source: PreviewImageSource): ImageBitmap = when (source) {

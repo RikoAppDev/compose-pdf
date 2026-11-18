@@ -1,11 +1,14 @@
 package io.github.rikoappdev.composepdf.preview
 
+import io.github.rikoappdev.composepdf.FontWeight
 import io.github.rikoappdev.composepdf.HorizontalAlignment
+import io.github.rikoappdev.composepdf.MPT_PER_PT
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PdfDocumentSpec
 import io.github.rikoappdev.composepdf.PhotoFit
 import io.github.rikoappdev.composepdf.RenderImageTable
 import io.github.rikoappdev.composepdf.font.FontBook
+import io.github.rikoappdev.composepdf.fontUnitsToMpt
 import io.github.rikoappdev.composepdf.layoutDocument
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
 import io.github.rikoappdev.composepdf.pdf.JpegImage
@@ -44,27 +47,32 @@ sealed interface PreviewOp
 /** A line of text with its baseline at ([xPt], [baselineYPt]). [colorArgb] is opaque (0xFF alpha).
  *  [glyphXPt] holds the absolute x (page points) of each code point in [text], computed from the
  *  engine's own glyph advances — so the on-screen preview can place each glyph exactly where the PDF
- *  puts it, instead of drifting on the platform font's slightly different advance widths. */
+ *  puts it, instead of drifting on the platform font's slightly different advance widths.
+ *  [fontWeight] is the face the PDF sets the run in: [FontWeight.Medium] only when a Medium face was
+ *  supplied (otherwise such text is [FontWeight.Normal], exactly as in the PDF). */
 class PreviewText internal constructor(
     val text: String,
-    val xPt: Int,
-    val baselineYPt: Int,
-    val fontSizePt: Int,
-    val bold: Boolean,
+    val xPt: Float,
+    val baselineYPt: Float,
+    val fontSizePt: Float,
+    val fontWeight: FontWeight,
     val colorArgb: Int,
-    val glyphXPt: IntArray,
-) : PreviewOp
+    val glyphXPt: FloatArray,
+) : PreviewOp {
+    /** `true` when the run is set in the Bold face. */
+    val bold: Boolean get() = fontWeight == FontWeight.Bold
+}
 
 /** A filled and/or stroked rectangle (top-left origin); [cornerRadiusPt] > 0 rounds the corners. */
 class PreviewRect internal constructor(
-    val xPt: Int,
-    val yPt: Int,
-    val wPt: Int,
-    val hPt: Int,
+    val xPt: Float,
+    val yPt: Float,
+    val wPt: Float,
+    val hPt: Float,
     val fillArgb: Int?,
     val strokeArgb: Int?,
-    val strokeWidthPt: Int,
-    val cornerRadiusPt: Int,
+    val strokeWidthPt: Float,
+    val cornerRadiusPt: Float,
 ) : PreviewOp
 
 /** Where a [PreviewImage]'s pixels come from. */
@@ -123,15 +131,17 @@ class PreviewVector internal constructor(val paths: List<PreviewPath>) : Preview
 
 /**
  * Lays the document out exactly as `render()` would and returns each page as a [PreviewPage] of
- * resolved, UI-free draw ops — for an on-screen preview. The Regular + Bold fonts are the same bytes
- * passed to `render()`. Pure data; no Compose dependency.
+ * resolved, UI-free draw ops — for an on-screen preview. The Regular + Bold (and optional Medium)
+ * fonts are the same bytes passed to `render()`; without [mediumFontBytes], Medium text is laid out in
+ * the Regular face, as in the PDF. Pure data; no Compose dependency.
  */
 fun PdfDocumentSpec.previewPages(
     regularFontBytes: ByteArray,
     boldFontBytes: ByteArray,
+    mediumFontBytes: ByteArray? = null,
 ): List<PreviewPage> {
     val table = RenderImageTable(this.images)
-    val book = FontBook(regularFontBytes, boldFontBytes, imageTable = table)
+    val book = FontBook(regularFontBytes, boldFontBytes, imageTable = table, mediumBytes = mediumFontBytes)
     val result = layoutDocument(this, book, table)
     val images = result.images
     return result.pages.map { page ->
@@ -157,31 +167,34 @@ private fun StringBuilder.appendCp(cp: Int) {
     }
 }
 
+/** A millipoint length as preview points. */
+private fun pt(mpt: Int): Float = mpt / MPT_PER_PT.toFloat()
+
 private fun TextOp.toPreview(book: FontBook): PreviewText {
     val map = book.gidToCp(weight)
     val font = book.fontFor(weight)
     val upm = font.unitsPerEm
     val sb = StringBuilder(gids.size)
-    val xs = ArrayList<Int>(gids.size)
+    val xs = ArrayList<Float>(gids.size)
     var cumUnits = 0L
     for (g in gids) {
         // Place each glyph at the rounded CUMULATIVE advance (font units → points), NOT a running sum
-        // of per-glyph rounded deltas. This matches the engine's round-once measureWidthPt, so the run
-        // ends at exactly xPt + measureWidthPt; the old per-glyph rounding accumulated ~0.4pt per
+        // of per-glyph rounded deltas. This matches the engine's round-once measureWidthMpt, so the run
+        // ends at exactly x + measureWidthMpt; the old per-glyph rounding accumulated ~0.4pt per
         // tabular digit and pushed digit-heavy right-aligned text past its edge (preview only).
-        map[g]?.let { sb.appendCp(it); xs.add(xPt + ((cumUnits * fontSizePt + upm / 2) / upm).toInt()) }
+        map[g]?.let { sb.appendCp(it); xs.add(pt(xMpt + fontUnitsToMpt(cumUnits, upm, fontSizeMpt))) }
         cumUnits += font.advanceWidth(g)
     }
-    return PreviewText(sb.toString(), xPt, baselineYPt, fontSizePt, weight == io.github.rikoappdev.composepdf.FontWeight.Bold, color.argb(), xs.toIntArray())
+    return PreviewText(sb.toString(), pt(xMpt), pt(baselineYMpt), pt(fontSizeMpt), weight, color.argb(), xs.toFloatArray())
 }
 
 private fun RectOp.toPreview() =
-    PreviewRect(xPt, yPt, wPt, hPt, fill?.argb(), stroke?.argb(), strokeWidthPt, cornerRadiusPt)
+    PreviewRect(pt(xMpt), pt(yMpt), pt(wMpt), pt(hMpt), fill?.argb(), stroke?.argb(), pt(strokeWidthMpt), pt(cornerRadiusMpt))
 
 /** Result of fitting intrinsic [iw]×[ih] into a box, mirroring the serializer's cover/contain/smart. */
 private class Placed(val ox: Double, val oy: Double, val dw: Double, val dh: Double, val cover: Boolean)
 
-private fun place(boxX: Int, boxY: Int, boxW: Int, boxH: Int, iw: Double, ih: Double, fit: PhotoFit, align: HorizontalAlignment): Placed {
+private fun place(boxX: Double, boxY: Double, boxW: Double, boxH: Double, iw: Double, ih: Double, fit: PhotoFit, align: HorizontalAlignment): Placed {
     val coverS = maxOf(boxW / iw, boxH / ih)
     val containS = minOf(boxW / iw, boxH / ih)
     val useCover = when (fit) {
@@ -209,12 +222,16 @@ private fun ImageOp.toPreview(images: List<EmbeddedImage>): PreviewImage? {
         is PngImageData -> PreviewRasterImage(img.width, img.height, pngArgb(img))
         else -> return null
     }
-    val iw = (if (intrinsicW > 0) intrinsicW else wPt).toDouble()
-    val ih = (if (intrinsicH > 0) intrinsicH else hPt).toDouble()
-    val p = place(xPt, yPt, wPt, hPt, iw, ih, fit, align)
+    val x = xMpt / MPT_PER_PT.toDouble()
+    val y = yMpt / MPT_PER_PT.toDouble()
+    val w = wMpt / MPT_PER_PT.toDouble()
+    val h = hMpt / MPT_PER_PT.toDouble()
+    val iw = if (intrinsicW > 0) intrinsicW.toDouble() else w
+    val ih = if (intrinsicH > 0) intrinsicH.toDouble() else h
+    val p = place(x, y, w, h, iw, ih, fit, align)
     return PreviewImage(
         p.ox.toFloat(), p.oy.toFloat(), p.dw.toFloat(), p.dh.toFloat(),
-        p.cover, xPt.toFloat(), yPt.toFloat(), wPt.toFloat(), hPt.toFloat(), source,
+        p.cover, x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), source,
     )
 }
 
@@ -239,7 +256,7 @@ private fun VectorOp.toPreview(images: List<EmbeddedImage>): PreviewVector? {
     val vw = model.viewportW
     val vh = model.viewportH
     if (vw <= 0.0 || vh <= 0.0) return null
-    val p = place(xPt, yPt, wPt, hPt, vw, vh, fit, align)
+    val p = place(xMpt / MPT_PER_PT.toDouble(), yMpt / MPT_PER_PT.toDouble(), wMpt / MPT_PER_PT.toDouble(), hMpt / MPT_PER_PT.toDouble(), vw, vh, fit, align)
     val s = p.dw / vw
     fun px(x: Double) = (p.ox + x * s).toFloat()
     fun py(y: Double) = (p.oy + y * s).toFloat()

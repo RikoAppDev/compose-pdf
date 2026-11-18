@@ -2,11 +2,14 @@ package io.github.rikoappdev.composepdf.pdf
 
 import io.github.rikoappdev.composepdf.FontWeight
 import io.github.rikoappdev.composepdf.HorizontalAlignment
+import io.github.rikoappdev.composepdf.MPT_PER_PT
 import io.github.rikoappdev.composepdf.PdfColor
 import io.github.rikoappdev.composepdf.PdfImageSource
 import io.github.rikoappdev.composepdf.PdfSink
 import io.github.rikoappdev.composepdf.PhotoFit
+import io.github.rikoappdev.composepdf.fmtMpt
 import io.github.rikoappdev.composepdf.font.FontBook
+import io.github.rikoappdev.composepdf.halfTrunc
 import io.github.rikoappdev.composepdf.render.ImageOp
 import io.github.rikoappdev.composepdf.render.Page
 import io.github.rikoappdev.composepdf.render.RectOp
@@ -108,11 +111,15 @@ private fun buildDoc(
     val catalog = doc.reserve()
     val pagesObj = doc.reserve()
 
-    // Embed each used face once; map weight -> (resourceName, objNum).
+    // Embed each used face once (Regular, Bold, then Medium); map weight -> (resourceName, objNum).
     val fontRes = LinkedHashMap<FontWeight, Pair<String, Int>>()
     var fi = 0
     for (w in book.usedWeights()) {
-        val tag = if (w == FontWeight.Bold) "CPDFBD" else "CPDFRG"
+        val tag = when (w) {
+            FontWeight.Bold -> "CPDFBD"
+            FontWeight.Medium -> "CPDFMD"
+            FontWeight.Normal -> "CPDFRG"
+        }
         val num = emitType0Font(doc, book.fontFor(w), book.usedGids(w), book.gidToCp(w), "$tag+NotoSans")
         fontRes[w] = "F$fi" to num
         fi++
@@ -191,101 +198,128 @@ private fun buildDoc(
     return doc to catalog
 }
 
+/**
+ * Draw size, in millipoints, of an image fitted to [sizePt] points: whole points for a box whose
+ * sides are whole points (exactly the 0.10.0 rounding), 0.001 pt for a fractional box — so a cover
+ * image still reaches every edge of a box like 186.4 pt instead of stopping 0.4 pt short.
+ */
+private fun imageDrawMpt(sizePt: Double, wholeBox: Boolean): Int =
+    if (wholeBox) sizePt.roundToInt() * MPT_PER_PT else (sizePt * MPT_PER_PT).roundToInt()
+
 private fun buildContent(
     page: Page,
     fontRes: Map<FontWeight, Pair<String, Int>>,
     imgRes: List<Pair<String, Int>>,
 ): ByteArray {
     val b = ByteBuf(1024)
-    val h = page.heightPt
+    val h = page.heightPt * MPT_PER_PT
     for (op in page.ops) when (op) {
         is RectOp -> {
-            val yPdf = h - (op.yPt + op.hPt)
-            val path = rectPath(op.xPt, yPdf, op.wPt, op.hPt, op.cornerRadiusPt)
+            val yPdf = h - (op.yMpt + op.hMpt)
+            val path = rectPath(op.xMpt, yPdf, op.wMpt, op.hMpt, op.cornerRadiusMpt)
             op.fill?.let { b.ascii("${fill(it)}$path f\n") }
-            op.stroke?.let { b.ascii("${stroke(it)}${op.strokeWidthPt} w\n$path S\n") }
+            op.stroke?.let { b.ascii("${stroke(it)}${fmtMpt(op.strokeWidthMpt)} w\n$path S\n") }
         }
         is TextOp -> {
             val resName = fontRes.getValue(op.weight).first
             b.ascii(fill(op.color))
-            b.ascii("BT\n/$resName ${op.fontSizePt} Tf\n${op.xPt} ${h - op.baselineYPt} Td\n<")
+            b.ascii("BT\n/$resName ${fmtMpt(op.fontSizeMpt)} Tf\n${fmtMpt(op.xMpt)} ${fmtMpt(h - op.baselineYMpt)} Td\n<")
             for (g in op.gids) b.ascii(g.toHex4())
             b.ascii("> Tj\nET\n")
         }
         is ImageOp -> {
             val name = imgRes[op.imageIndex].first
-            val boxYPdf = h - (op.yPt + op.hPt)
-            val iw = if (op.intrinsicW > 0) op.intrinsicW else op.wPt
-            val ih = if (op.intrinsicH > 0) op.intrinsicH else op.hPt
-            val coverS = maxOf(op.wPt.toDouble() / iw, op.hPt.toDouble() / ih)
-            val containS = minOf(op.wPt.toDouble() / iw, op.hPt.toDouble() / ih)
+            val boxYPdf = h - (op.yMpt + op.hMpt)
+            val wPt = op.wMpt / MPT_PER_PT.toDouble()
+            val hPt = op.hMpt / MPT_PER_PT.toDouble()
+            val iw = if (op.intrinsicW > 0) op.intrinsicW.toDouble() else wPt
+            val ih = if (op.intrinsicH > 0) op.intrinsicH.toDouble() else hPt
+            val coverS = maxOf(wPt / iw, hPt / ih)
+            val containS = minOf(wPt / iw, hPt / ih)
             val useCover = when (op.fit) {
                 PhotoFit.Cover -> true
                 PhotoFit.Contain -> false
                 // Smart: contain, unless the contained image would fill < 25% of a cell axis (an
                 // extreme aspect ratio) — then crop-to-fill so it isn't a thin sliver.
-                PhotoFit.Smart -> minOf(iw * containS / op.wPt, ih * containS / op.hPt) < 0.25
+                PhotoFit.Smart -> minOf(iw * containS / wPt, ih * containS / hPt) < 0.25
             }
             val s = if (useCover) coverS else containS
-            val dw = (iw * s).roundToInt()
-            val dh = (ih * s).roundToInt()
-            val ox = op.xPt + when (op.align) {
+            val wholeBox = op.wMpt % MPT_PER_PT == 0 && op.hMpt % MPT_PER_PT == 0
+            val dw = imageDrawMpt(iw * s, wholeBox)
+            val dh = imageDrawMpt(ih * s, wholeBox)
+            // Centring: truncated to whole points when the box and the draw size are whole (the 0.10.0
+            // offsets), else to 0.001 pt, so a fractional box centres its image exactly.
+            val wholeDraw = wholeBox && dw % MPT_PER_PT == 0 && dh % MPT_PER_PT == 0
+            fun half(free: Int) = if (wholeDraw) halfTrunc(free) else free / 2
+            val ox = op.xMpt + when (op.align) {
                 HorizontalAlignment.Start -> 0
-                HorizontalAlignment.Center -> (op.wPt - dw) / 2
-                HorizontalAlignment.End -> op.wPt - dw
+                HorizontalAlignment.Center -> half(op.wMpt - dw)
+                HorizontalAlignment.End -> op.wMpt - dw
             }
-            val oy = boxYPdf + (op.hPt - dh) / 2
+            val oy = boxYPdf + half(op.hMpt - dh)
+            val place = "${fmtMpt(dw)} 0 0 ${fmtMpt(dh)} ${fmtMpt(ox)} ${fmtMpt(oy)} cm\n/$name Do\nQ\n"
             if (useCover) {
-                b.ascii("q\n${op.xPt} $boxYPdf ${op.wPt} ${op.hPt} re W n\n$dw 0 0 $dh $ox $oy cm\n/$name Do\nQ\n")
+                b.ascii("q\n${fmtMpt(op.xMpt)} ${fmtMpt(boxYPdf)} ${fmtMpt(op.wMpt)} ${fmtMpt(op.hMpt)} re W n\n$place")
             } else {
-                b.ascii("q\n$dw 0 0 $dh $ox $oy cm\n/$name Do\nQ\n")
+                b.ascii("q\n$place")
             }
         }
         is VectorOp -> {
             val name = imgRes[op.imageIndex].first
-            val boxYPdf = h - (op.yPt + op.hPt)
-            val vw = if (op.intrinsicW > 0) op.intrinsicW else op.wPt
-            val vh = if (op.intrinsicH > 0) op.intrinsicH else op.hPt
-            val coverS = maxOf(op.wPt.toDouble() / vw, op.hPt.toDouble() / vh)
-            val containS = minOf(op.wPt.toDouble() / vw, op.hPt.toDouble() / vh)
+            val boxYPdf = h - (op.yMpt + op.hMpt)
+            val xPt = op.xMpt / MPT_PER_PT.toDouble()
+            val wPt = op.wMpt / MPT_PER_PT.toDouble()
+            val hPt = op.hMpt / MPT_PER_PT.toDouble()
+            val vw = if (op.intrinsicW > 0) op.intrinsicW.toDouble() else wPt
+            val vh = if (op.intrinsicH > 0) op.intrinsicH.toDouble() else hPt
+            val coverS = maxOf(wPt / vw, hPt / vh)
+            val containS = minOf(wPt / vw, hPt / vh)
             val useCover = when (op.fit) {
                 PhotoFit.Cover -> true
                 PhotoFit.Contain -> false
-                PhotoFit.Smart -> minOf(vw * containS / op.wPt, vh * containS / op.hPt) < 0.25
+                PhotoFit.Smart -> minOf(vw * containS / wPt, vh * containS / hPt) < 0.25
             }
             val s = if (useCover) coverS else containS
             val dw = vw * s
             val dh = vh * s
-            val ox = op.xPt + when (op.align) {
+            val ox = xPt + when (op.align) {
                 HorizontalAlignment.Start -> 0.0
-                HorizontalAlignment.Center -> (op.wPt - dw) / 2
-                HorizontalAlignment.End -> op.wPt - dw
+                HorizontalAlignment.Center -> (wPt - dw) / 2
+                HorizontalAlignment.End -> wPt - dw
             }
-            val oy = boxYPdf + (op.hPt - dh) / 2
+            val oy = boxYPdf / MPT_PER_PT.toDouble() + (hPt - dh) / 2
             // The form lives in its own BBox [0 0 vw vh]; scale by dw/vw, dh/vh to the target box.
             val sx = dw / vw
             val sy = dh / vh
+            val place = "${fmtNum(sx)} 0 0 ${fmtNum(sy)} ${fmtNum(ox)} ${fmtNum(oy)} cm\n/$name Do\nQ\n"
             if (useCover) {
-                b.ascii("q\n${op.xPt} $boxYPdf ${op.wPt} ${op.hPt} re W n\n${fmtNum(sx)} 0 0 ${fmtNum(sy)} ${fmtNum(ox)} ${fmtNum(oy)} cm\n/$name Do\nQ\n")
+                b.ascii("q\n${fmtMpt(op.xMpt)} ${fmtMpt(boxYPdf)} ${fmtMpt(op.wMpt)} ${fmtMpt(op.hMpt)} re W n\n$place")
             } else {
-                b.ascii("q\n${fmtNum(sx)} 0 0 ${fmtNum(sy)} ${fmtNum(ox)} ${fmtNum(oy)} cm\n/$name Do\nQ\n")
+                b.ascii("q\n$place")
             }
         }
     }
     return b.toByteArray()
 }
 
-/** A rectangle path in PDF user space; rounds the corners when [r] > 0 (Bézier quarter-circles). */
+/**
+ * A rectangle path in PDF user space (millipoints in, PDF numbers out); rounds the corners when
+ * [r] > 0 (Bézier quarter-circles). The radius is clamped to half the (whole-point truncated) width
+ * and height. The control-point offset is rounded to whole points when that radius is a whole point
+ * (the 0.10.0 path), else to 0.001 pt — so a small fractional radius (under 0.905 pt) still curves
+ * instead of collapsing to a chamfer.
+ */
 private fun rectPath(x: Int, y: Int, w: Int, h: Int, r: Int): String {
-    if (r <= 0) return "$x $y $w $h re"
-    val rr = minOf(r, w / 2, h / 2)
-    val ck = (rr * 0.5523).roundToInt()
+    if (r <= 0) return "${fmtMpt(x)} ${fmtMpt(y)} ${fmtMpt(w)} ${fmtMpt(h)} re"
+    val rr = minOf(r, halfTrunc(w), halfTrunc(h))
+    val ck = if (rr % MPT_PER_PT == 0) ((rr / MPT_PER_PT.toDouble()) * 0.5523).roundToInt() * MPT_PER_PT else (rr * 0.5523).roundToInt()
     val xr = x + rr; val xw = x + w; val xwr = x + w - rr
     val yr = y + rr; val yh = y + h; val yhr = y + h - rr
-    return "$xr $y m $xwr $y l ${xwr + ck} $y $xw ${yr - ck} $xw $yr c " +
-        "$xw $yhr l $xw ${yhr + ck} ${xwr + ck} $yh $xwr $yh c " +
-        "$xr $yh l ${xr - ck} $yh $x ${yhr + ck} $x $yhr c " +
-        "$x $yr l $x ${yr - ck} ${xr - ck} $y $xr $y c h"
+    fun f(v: Int) = fmtMpt(v)
+    return "${f(xr)} ${f(y)} m ${f(xwr)} ${f(y)} l ${f(xwr + ck)} ${f(y)} ${f(xw)} ${f(yr - ck)} ${f(xw)} ${f(yr)} c " +
+        "${f(xw)} ${f(yhr)} l ${f(xw)} ${f(yhr + ck)} ${f(xwr + ck)} ${f(yh)} ${f(xwr)} ${f(yh)} c " +
+        "${f(xr)} ${f(yh)} l ${f(xr - ck)} ${f(yh)} ${f(x)} ${f(yhr + ck)} ${f(x)} ${f(yhr)} c " +
+        "${f(x)} ${f(yr)} l ${f(x)} ${f(yr - ck)} ${f(xr - ck)} ${f(y)} ${f(xr)} ${f(y)} c h"
 }
 
 /** PDF color component as a deterministic "0.ddd"/"1" decimal string (value/255). */

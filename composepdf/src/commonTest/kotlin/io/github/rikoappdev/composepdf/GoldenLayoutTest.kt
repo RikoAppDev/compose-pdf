@@ -23,19 +23,19 @@ class GoldenLayoutTest {
     }
 }
 
-/** Monospace-ish deterministic metrics in integer font units (unitsPerEm = 1000). */
-private object StubMetrics : TextMetrics {
-    private const val UPM = 1000L
+/** Monospace-ish deterministic metrics in integer font units (unitsPerEm = 1000), sizes in millipoints. */
+internal object StubMetrics : TextMetrics {
+    private const val UPM = 1000
     private const val ADVANCE = 600L // every glyph is 0.6 em wide
     private const val ASCENT = 800L
 
     override fun shape(text: String, w: FontWeight): IntArray = IntArray(text.length) { text[it].code }
-    override fun measureWidthPt(text: String, w: FontWeight, fontSizePt: Int): Int =
-        ((text.length * ADVANCE * fontSizePt + UPM / 2) / UPM).toInt()
-    override fun widthOfPt(gids: IntArray, w: FontWeight, fontSizePt: Int): Int =
-        ((gids.size * ADVANCE * fontSizePt + UPM / 2) / UPM).toInt()
-    override fun ascentPt(w: FontWeight, fontSizePt: Int): Int =
-        ((ASCENT * fontSizePt + UPM / 2) / UPM).toInt()
+    override fun measureWidthMpt(text: String, w: FontWeight, fontSizeMpt: Int): Int =
+        fontUnitsToMpt(text.length * ADVANCE, UPM, fontSizeMpt)
+    override fun widthOfMpt(gids: IntArray, w: FontWeight, fontSizeMpt: Int): Int =
+        fontUnitsToMpt(gids.size * ADVANCE, UPM, fontSizeMpt)
+    override fun ascentMpt(w: FontWeight, fontSizeMpt: Int): Int =
+        fontUnitsToMpt(ASCENT, UPM, fontSizeMpt)
 }
 
 /** A fixed document exercising wrapping, alignment, weighted rows, a bordered box and a paginating table. */
@@ -87,8 +87,8 @@ internal fun goldenCanonical(): String {
     for ((p, page) in pages.withIndex()) {
         for (op in page.ops) if (op is TextOp) {
             sb.append(p).append('|')
-                .append(op.xPt).append(',').append(op.baselineYPt).append('|')
-                .append(op.fontSizePt).append('|')
+                .append(fmtMpt(op.xMpt)).append(',').append(fmtMpt(op.baselineYMpt)).append('|')
+                .append(fmtMpt(op.fontSizeMpt)).append('|')
                 .append(op.weight.ordinal).append('|')
                 .append(op.gids.joinToString(","))
                 .append('\n')

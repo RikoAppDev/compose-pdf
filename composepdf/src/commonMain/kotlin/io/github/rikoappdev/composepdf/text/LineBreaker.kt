@@ -7,10 +7,11 @@ import io.github.rikoappdev.composepdf.font.TextMetrics
  *  placed alone (it may overflow — long-word breaking is a later refinement). Deterministic:
  *  decisions come only from integer font-unit measurements. Trailing whitespace is trimmed from each
  *  produced line so an invisible trailing space / tab / NBSP can't shift right- or centre-aligned
- *  text (splitting on `' '` already drops ASCII spaces, but not tabs or non-breaking spaces). */
+ *  text (splitting on `' '` already drops ASCII spaces, but not tabs or non-breaking spaces).
+ *  Font size and width are in millipoints. */
 internal object LineBreaker {
 
-    fun wrap(text: String, weight: FontWeight, fontSizePt: Int, maxWidthPt: Int, book: TextMetrics): List<String> {
+    fun wrap(text: String, weight: FontWeight, fontSizeMpt: Int, maxWidthMpt: Int, book: TextMetrics): List<String> {
         val out = ArrayList<String>()
         for (hardLine in text.split('\n')) {
             if (hardLine.isEmpty()) { out.add(""); continue }
@@ -19,7 +20,7 @@ internal object LineBreaker {
             var line = StringBuilder()
             for (word in words) {
                 val candidate = if (line.isEmpty()) word else "$line $word"
-                if (line.isEmpty() || book.measureWidthPt(candidate, weight, fontSizePt) <= maxWidthPt) {
+                if (line.isEmpty() || book.measureWidthMpt(candidate, weight, fontSizeMpt) <= maxWidthMpt) {
                     line = StringBuilder(candidate)
                 } else {
                     out.add(line.toString().trimEnd())

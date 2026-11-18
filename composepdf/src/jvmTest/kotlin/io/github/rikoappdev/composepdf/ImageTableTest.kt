@@ -45,7 +45,7 @@ class ImageTableTest {
     private fun vectorOp(index: Int) =
         VectorOp(11, 21, 31, 41, index, 24, 16, PhotoFit.Contain, HorizontalAlignment.Start)
 
-    private fun rect() = RectOp(0, 0, 1, 1, fill = Color(0xFF000000), stroke = null, strokeWidthPt = 0)
+    private fun rect() = RectOp(0, 0, 1, 1, fill = Color(0xFF000000), stroke = null, strokeWidthMpt = 0)
 
     /** A source that records how often it was pulled. */
     private class CountingSource(private val bytes: ByteArray) : PdfImageSource {
@@ -94,10 +94,10 @@ class ImageTableTest {
         assertEquals(0, img.imageIndex)
         assertEquals(1, assertIs<VectorOp>(p2.ops[1]).imageIndex)
         // Everything but the index survives the rewrite.
-        assertEquals(listOf(7, 20, 30, 40, 5, 6), listOf(img.xPt, img.yPt, img.wPt, img.hPt, img.intrinsicW, img.intrinsicH))
+        assertEquals(listOf(7, 20, 30, 40, 5, 6), listOf(img.xMpt, img.yMpt, img.wMpt, img.hMpt, img.intrinsicW, img.intrinsicH))
         assertEquals(PhotoFit.Smart, img.fit)
         assertEquals(HorizontalAlignment.End, img.align)
-        assertEquals(listOf(11, 21, 31, 41, 24, 16), listOf(v1.xPt, v1.yPt, v1.wPt, v1.hPt, v1.intrinsicW, v1.intrinsicH))
+        assertEquals(listOf(11, 21, 31, 41, 24, 16), listOf(v1.xMpt, v1.yMpt, v1.wMpt, v1.hMpt, v1.intrinsicW, v1.intrinsicH))
         assertEquals(PhotoFit.Contain, v1.fit)
         assertEquals(HorizontalAlignment.Start, v1.align)
     }

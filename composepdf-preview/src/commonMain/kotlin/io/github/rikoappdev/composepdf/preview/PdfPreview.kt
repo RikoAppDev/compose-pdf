@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import io.github.rikoappdev.composepdf.PdfDocumentSpec
+import io.github.rikoappdev.composepdf.FontWeight as PdfFontWeight
 import kotlin.math.roundToInt
 
 /**
@@ -57,9 +58,11 @@ import kotlin.math.roundToInt
  * clean bordered sheet on a grey backdrop — set [pageWidth] to render at a fixed width and let the
  * preview self-size to the whole document, or leave it null to fill the available width and scroll.
  *
- * Fonts are the same Regular + Bold bytes you pass to `render()`. For zero-setup IDE previews of your
- * own documents, use [previewFontRegular]/[previewFontBold] (a font bundled in this preview artifact,
- * loaded synchronously so it works inside the IDE preview runtime).
+ * Fonts are the same Regular + Bold bytes you pass to `render()`, plus the optional
+ * [mediumFontBytes] for `FontWeight.Medium` text (without it, Medium text previews in the Regular
+ * face, exactly as `render()` sets it). For zero-setup IDE previews of your own documents, use
+ * [previewFontRegular]/[previewFontBold] (a font bundled in this preview artifact, loaded synchronously
+ * so it works inside the IDE preview runtime).
  */
 @Composable
 fun PdfPreview(
@@ -77,12 +80,14 @@ fun PdfPreview(
     pageGap: Dp = 16.dp,
     pageColor: Color = Color.White,
     backgroundColor: Color = Color(0xFFE9ECEF),
+    /** Medium face for `FontWeight.Medium` text — the same bytes passed to `render(mediumFontBytes = …)`. */
+    mediumFontBytes: ByteArray? = null,
 ) {
-    val pages = remember(spec, regularFontBytes, boldFontBytes) {
-        spec.previewPages(regularFontBytes, boldFontBytes)
+    val pages = remember(spec, regularFontBytes, boldFontBytes, mediumFontBytes) {
+        spec.previewPages(regularFontBytes, boldFontBytes, mediumFontBytes)
     }
-    val family = remember(regularFontBytes, boldFontBytes) {
-        previewFontFamily(regularFontBytes, boldFontBytes)
+    val family = remember(regularFontBytes, boldFontBytes, mediumFontBytes) {
+        previewFontFamily(regularFontBytes, boldFontBytes, mediumFontBytes)
     }
     val bitmaps = remember(pages) {
         val map = HashMap<PreviewImage, ImageBitmap>()
@@ -183,7 +188,11 @@ private fun DrawScope.drawOp(
             val style = TextStyle(
                 color = Color(op.colorArgb),
                 fontFamily = family,
-                fontWeight = if (op.bold) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = when (op.fontWeight) {
+                    PdfFontWeight.Bold -> FontWeight.Bold
+                    PdfFontWeight.Medium -> FontWeight.Medium
+                    PdfFontWeight.Normal -> FontWeight.Normal
+                },
                 fontSize = sp,
             )
             // Draw each code point at the engine's exact x ([glyphXPt]) rather than as one measured run,

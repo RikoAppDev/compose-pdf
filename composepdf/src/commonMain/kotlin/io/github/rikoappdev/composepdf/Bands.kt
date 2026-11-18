@@ -62,20 +62,20 @@ class BandScope internal constructor(
  * so a page-aware band's render recognises those instances unread and reuses their image objects.
  */
 internal sealed interface Band {
-    val gapPt: Int
+    val gapMpt: Int
     val probed: KnownImages
 }
 
 /** A band that never reads [BandScope.page]: built once, identical on every page. */
 internal class StaticBand(
     val nodes: List<Node>,
-    override val gapPt: Int,
+    override val gapMpt: Int,
     override val probed: KnownImages,
 ) : Band
 
 /** A band that reads [BandScope.page]: rebuilt per page at layout time. */
 internal class PageAwareBand(
     val build: BandScope.() -> Unit,
-    override val gapPt: Int,
+    override val gapMpt: Int,
     override val probed: KnownImages,
 ) : Band

@@ -10,9 +10,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.Font
 import java.io.File
 
-internal actual fun previewFontFamily(regular: ByteArray, bold: ByteArray): FontFamily = FontFamily(
-    Font(tempTtf(regular, "cp-preview-regular"), FontWeight.Normal, FontStyle.Normal),
-    Font(tempTtf(bold, "cp-preview-bold"), FontWeight.Bold, FontStyle.Normal),
+internal actual fun previewFontFamily(regular: ByteArray, bold: ByteArray, medium: ByteArray?): FontFamily = FontFamily(
+    listOfNotNull(
+        Font(tempTtf(regular, "cp-preview-regular"), FontWeight.Normal, FontStyle.Normal),
+        Font(tempTtf(bold, "cp-preview-bold"), FontWeight.Bold, FontStyle.Normal),
+        medium?.let { Font(tempTtf(it, "cp-preview-medium"), FontWeight.Medium, FontStyle.Normal) },
+    ),
 )
 
 private fun tempTtf(bytes: ByteArray, name: String): File {

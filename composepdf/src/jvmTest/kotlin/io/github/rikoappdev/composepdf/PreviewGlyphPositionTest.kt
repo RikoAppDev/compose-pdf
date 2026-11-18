@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 
 /**
  * The preview places each glyph at the rounded CUMULATIVE advance (matching the engine's round-once
- * [measureWidthPt]), not a running sum of per-glyph rounded deltas. The old per-glyph rounding added
+ * `measureWidthMpt`), not a running sum of per-glyph rounded deltas. The old per-glyph rounding added
  * ~0.4pt per tabular digit, so a right-aligned number drifted past its edge in the on-screen preview
  * (the exported PDF was always correct). A run of identical digits is the tell-tale: with round-once
  * cumulative math the integer step is not constant (it alternates floor/ceil); with per-glyph rounding

@@ -26,14 +26,94 @@ import io.github.rikoappdev.composepdf.render.Page
 import io.github.rikoappdev.composepdf.render.RectOp
 import io.github.rikoappdev.composepdf.text.LineBreaker
 import kotlin.jvm.JvmName
+import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.truncate
 
 enum class PageSize(val widthPt: Int, val heightPt: Int) {
     A4(595, 842),
     LETTER(612, 792),
 }
 
+/**
+ * Page margins, one per side, set once for the whole document through [PageConfig.margins] — shaped
+ * like Compose `PaddingValues`. Every parameter defaults to the more general one: a side falls back to
+ * [horizontal] or [vertical], and those fall back to [all]:
+ *
+ * ```
+ * PageMargins(36.dp)                                 // 36 pt on every side
+ * PageMargins(all = 36.dp, bottom = 14.6.dp)         // only the bottom differs
+ * PageMargins(horizontal = 40.dp, vertical = 28.dp)
+ * PageMargins(start = 30.dp, top = 24.dp, end = 30.dp, bottom = 20.dp)
+ * ```
+ *
+ * [start] is the left margin and [end] the right one (PDF pages have no layout direction). The
+ * header's top edge rests on [top]; the footer's bottom edge — or the page-number line, when
+ * `PageConfig.pageNumbers` is on — rests on [bottom]. The body takes what is left on each page: the
+ * page minus the margins, minus the header and footer as measured on that page, minus their gaps. No
+ * side may be negative.
+ *
+ * Two margins are equal when every side is the same to 0.001 pt, the precision the layout honours.
+ */
+class PageMargins private constructor(
+    /** Left margin. */
+    val start: Dp,
+    val top: Dp,
+    /** Right margin. */
+    val end: Dp,
+    val bottom: Dp,
+    validate: Boolean,
+) {
+    constructor(
+        all: Dp = 36.dp,
+        horizontal: Dp = all,
+        vertical: Dp = all,
+        start: Dp = horizontal,
+        top: Dp = vertical,
+        end: Dp = horizontal,
+        bottom: Dp = vertical,
+    ) : this(start, top, end, bottom, validate = true)
+
+    init {
+        if (validate) {
+            require(start.value >= 0f && top.value >= 0f && end.value >= 0f && bottom.value >= 0f) {
+                "Page margins must not be negative, were $this"
+            }
+        }
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is PageMargins && start.mptKey() == other.start.mptKey() && top.mptKey() == other.top.mptKey() &&
+            end.mptKey() == other.end.mptKey() && bottom.mptKey() == other.bottom.mptKey()
+
+    override fun hashCode(): Int =
+        ((start.mptKey().hashCode() * 31 + top.mptKey().hashCode()) * 31 + end.mptKey().hashCode()) * 31 + bottom.mptKey().hashCode()
+
+    override fun toString(): String =
+        "PageMargins(start=${start.text()}, top=${top.text()}, end=${end.text()}, bottom=${bottom.text()})"
+
+    internal companion object {
+        /**
+         * The default `PageConfig.margins`: the `margin` shorthand on every side, **not** validated —
+         * a negative `margin` was accepted (and laid out) before per-side margins existed, so old
+         * documents keep rendering exactly as they did.
+         */
+        fun allSides(margin: Dp): PageMargins = PageMargins(margin, margin, margin, margin, validate = false)
+    }
+}
+
+/** This length as the layout rounds it, in whole millipoints (`-0f` and `0f` agree); never throws. */
+private fun Dp.mptKey(): Long = (floor(value.toDouble() * MPT_PER_PT + 0.5) + 0.0).toBits()
+
+/** `36.dp`, `14.6.dp`: a whole value without the trailing `.0`. */
+private fun Dp.text(): String =
+    (if (value.isFinite() && value == truncate(value) && abs(value) < 1e15f) value.toLong().toString() else value.toString()) + ".dp"
+
 class PageConfig(
     val size: PageSize = PageSize.A4,
+    /** Shorthand for the same margin on all four sides: the default [margins] puts it on every side,
+     *  like `PageMargins(all = margin)` (though a negative value is not rejected here, as in earlier
+     *  releases). When [margins] is passed explicitly, it wins and this is unused. */
     val margin: Dp = 36.dp,
     /** Auto page-number line at the bottom of every page. Its vertical space is reserved so content
      *  never overlaps it. Combine freely with a custom [ContainerScope.footer] band (footer sits
@@ -54,6 +134,8 @@ class PageConfig(
      * don't fit.
      */
     val keepBlocksTogether: Boolean = true,
+    /** Per-side page margins (see [PageMargins]); defaults to [margin] on every side. */
+    val margins: PageMargins = PageMargins.allSides(margin),
 )
 
 /** Compose-style container: stacks children vertically. Shared by the document root, columns,
@@ -62,13 +144,13 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
     internal val nodes = ArrayList<Node>()
 
     fun text(text: String, style: TextStyle = TextStyle()) { nodes.add(TextNode(text, style)) }
-    fun spacer(height: Dp) { nodes.add(SpacerNode(0, height.value)) }
+    fun spacer(height: Dp) { nodes.add(SpacerNode(0, height.mpt)) }
     fun divider(color: PdfColor = Color(0xFFDDDDDD), thickness: Dp = 1.dp) {
-        nodes.add(DividerNode(color, thickness.value))
+        nodes.add(DividerNode(color, thickness.mpt))
     }
 
     fun column(gap: Dp = 0.dp, build: ContainerScope.() -> Unit) {
-        nodes.add(ColumnNode(ContainerScope(registry).apply(build).nodes, gap.value))
+        nodes.add(ColumnNode(ContainerScope(registry).apply(build).nodes, gap.mpt))
     }
 
     /**
@@ -77,7 +159,7 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
      * short logo next to a taller text block.
      */
     fun row(gap: Dp = 0.dp, verticalAlignment: VerticalAlignment = VerticalAlignment.Top, build: RowScope.() -> Unit) {
-        nodes.add(RowScope(registry).apply(build).toNode(gap.value, verticalAlignment))
+        nodes.add(RowScope(registry).apply(build).toNode(gap.mpt, verticalAlignment))
     }
 
     /** A label/value line: [label] on the left, [value] right-aligned. Common in detail reports. */
@@ -105,11 +187,11 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
         nodes.add(
             BoxNode(
                 child = ColumnNode(ContainerScope(registry).apply(build).nodes, 0),
-                paddingPt = padding.value,
-                borderPt = border.value,
+                paddingMpt = padding.mpt,
+                borderMpt = border.mpt,
                 borderColor = borderColor,
                 background = background,
-                cornerRadiusPt = cornerRadius.value,
+                cornerRadiusMpt = cornerRadius.mpt,
             )
         )
     }
@@ -151,7 +233,7 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
     /** Shared body of the [image] overloads; [identity] is the caller's own handle (source or bytes). */
     private fun addImage(source: PdfImageSource, identity: Any, width: Dp, height: Dp, fit: PhotoFit, align: HorizontalAlignment) {
         val img = registry.image(source, identity)
-        nodes.add(ImageNode(img.index, width.value, height.value, img.intrinsicW, img.intrinsicH, fit, align))
+        nodes.add(ImageNode(img.index, width.mpt, height.mpt, img.intrinsicW, img.intrinsicH, fit, align))
     }
 
     /**
@@ -167,7 +249,7 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
      */
     fun vector(vectorBytes: ByteArray, width: Dp = 0.dp, height: Dp, fit: PhotoFit = PhotoFit.Contain, align: HorizontalAlignment = HorizontalAlignment.Center) {
         val form = registry.vector(vectorBytes)
-        nodes.add(VectorNode(form.index, width.value, height.value, form.intrinsicW, form.intrinsicH, fit, align))
+        nodes.add(VectorNode(form.index, width.mpt, height.mpt, form.intrinsicW, form.intrinsicH, fit, align))
     }
 
     /**
@@ -232,8 +314,8 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
                 rows = scope.rows,
                 headerStyle = headerStyle,
                 headerBackground = headerBackground,
-                cellPadHPt = cellPaddingHorizontal.value,
-                cellPadVPt = cellPaddingVertical.value,
+                cellPadHMpt = cellPaddingHorizontal.mpt,
+                cellPadVMpt = cellPaddingVertical.mpt,
                 gridColor = gridColor,
                 repeatHeader = repeatHeader,
             )
@@ -280,7 +362,7 @@ class RowScope internal constructor(private val registry: ImageRegistry) {
         cells.add(RowChild(ColumnNode(ContainerScope(registry).apply(build).nodes, 0), weight))
     }
 
-    internal fun toNode(gapPt: Int, valign: VerticalAlignment) = RowNode(cells.toList(), gapPt, valign)
+    internal fun toNode(gapMpt: Int, valign: VerticalAlignment) = RowNode(cells.toList(), gapMpt, valign)
 }
 
 class PdfContentScope internal constructor(registry: ImageRegistry) : ContainerScope(registry) {
@@ -288,15 +370,15 @@ class PdfContentScope internal constructor(registry: ImageRegistry) : ContainerS
     internal var footerBand: Band? = null
 
     private fun buildBand(gap: Dp, build: BandScope.() -> Unit): Band {
-        require(gap.value >= 0) { "A header/footer gap must not be negative, was ${gap.value}.dp" }
+        require(gap.value >= 0f) { "A header/footer gap must not be negative, was ${gap.value}.dp" }
         // The probe's images land in the document; recording them lets a page-aware band's render
         // reuse them unread — including a logo the other, static band already embeds.
         val probe = RecordingImageRegistry(registry)
         val scope = BandScope(probe, PageInfo(1, 1)).apply(build)
         return if (scope.pageRead) {
-            PageAwareBand(build, gap.value, probe.known())
+            PageAwareBand(build, gap.mpt, probe.known())
         } else {
-            StaticBand(scope.nodes, gap.value, probe.known())
+            StaticBand(scope.nodes, gap.mpt, probe.known())
         }
     }
 
@@ -344,7 +426,8 @@ class PdfDocumentSpec internal constructor(
     internal val footer: Band?,
 ) {
     /**
-     * Renders to PDF bytes using the supplied Regular + Bold TrueType fonts.
+     * Renders to PDF bytes using the supplied Regular + Bold TrueType fonts (and, optionally, a Medium
+     * face).
      *
      * The result is one contiguous array, so peak memory includes the whole file. For a photo-heavy
      * export prefer [renderTo], which writes the identical bytes straight to a destination — and pair
@@ -363,6 +446,10 @@ class PdfDocumentSpec internal constructor(
      * dropped), and color **vector** fonts (`COLR`/`CPAL`, e.g. Segoe UI Emoji) are not used. Passing
      * `null` keeps output byte-for-byte identical to the no-emoji path.
      *
+     * [mediumFontBytes], when supplied, is the face for [FontWeight.Medium] text. Without it, Medium
+     * text is set in the Regular face (as CSS font matching does for weight 500), so it renders exactly
+     * like [FontWeight.Normal] text; documents without Medium text are unaffected either way.
+     *
      * [onProgress], when supplied, is invoked with a monotonically increasing fraction in `0f..1f`:
      * `0f` once pagination is done (the total page count is known), then `(page + 1) / total` (scaled
      * to leave a small tail) as each page's content is serialized, and exactly `1f` once the final
@@ -374,11 +461,12 @@ class PdfDocumentSpec internal constructor(
         boldFontBytes: ByteArray,
         emojiFontBytes: ByteArray? = null,
         onProgress: ((Float) -> Unit)? = null,
+        mediumFontBytes: ByteArray? = null,
     ): ByteArray {
         // Emoji bitmaps discovered during layout are appended to the render's table after the
         // document's own images, so every index the layout emits points into result.images.
         val table = RenderImageTable(images)
-        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, imageTable = table)
+        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, imageTable = table, mediumBytes = mediumFontBytes)
         val result = layoutDocument(this, book, table)
         onProgress?.invoke(0f)
         return serializePdf(result.pages, book, result.images, onProgress)
@@ -405,7 +493,7 @@ class PdfDocumentSpec internal constructor(
      * written remain at the destination — deleting the partial output is the caller's job. The same
      * applies to a throwing [PdfImageSource].
      *
-     * Font, emoji and [onProgress] semantics are exactly those of [render].
+     * Font (including [mediumFontBytes]), emoji and [onProgress] semantics are exactly those of [render].
      */
     fun renderTo(
         sink: PdfSink,
@@ -413,27 +501,28 @@ class PdfDocumentSpec internal constructor(
         boldFontBytes: ByteArray,
         emojiFontBytes: ByteArray? = null,
         onProgress: ((Float) -> Unit)? = null,
+        mediumFontBytes: ByteArray? = null,
     ) {
         val table = RenderImageTable(images)
-        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, imageTable = table)
+        val book = FontBook(regularFontBytes, boldFontBytes, emojiFontBytes, imageTable = table, mediumBytes = mediumFontBytes)
         val result = layoutDocument(this, book, table)
         onProgress?.invoke(0f)
         serializePdfTo(sink, result.pages, book, result.images, onProgress)
     }
 }
 
-/** Don't open a box with less than this much vertical room left — avoids an empty box sliver. */
-private const val MIN_BOX_OPEN_ROOM_PT = 28
+/** Don't open a box with less than this much vertical room left (28 pt) — avoids an empty box sliver. */
+private const val MIN_BOX_OPEN_ROOM_MPT = 28 * MPT_PER_PT
 
-/** A box currently being flowed; tracks the top of its fragment on the current page. */
+/** A box currently being flowed; tracks the top of its fragment on the current page. Millipoints. */
 private class BoxFrame(
     val x: Int,
     val width: Int,
-    val padPt: Int,
-    val borderPt: Int,
+    val padMpt: Int,
+    val borderMpt: Int,
     val borderColor: PdfColor,
     val background: PdfColor?,
-    val cornerRadiusPt: Int,
+    val cornerRadiusMpt: Int,
     val depth: Int,
     var fragTop: Int,
 )
@@ -442,8 +531,8 @@ private class BoxFrame(
  * Single-pass page flow. Text and tables flow line/row-by-row; boxes and columns split across pages
  * (their border/background is redrawn per page fragment); rows and images are atomic (never split).
  * Each page's content area comes from [frameFor], asked once per page as the page opens, so bands
- * may reserve a different height on every page. All integer math → identical placement on every
- * platform.
+ * may reserve a different height on every page. [w] / [h] are the page size in whole points; every
+ * position is an integer in millipoints → identical placement on every platform.
  */
 private class Flow(
     val w: Int,
@@ -463,23 +552,29 @@ private class Flow(
     val depth get() = openBoxes.size
     fun roomLeft() = usableBottom - y
 
+    /** Moves the pen down by [heightMpt], saturating: a block taller than `Int` leaves the pen past every page bottom. */
+    fun advance(heightMpt: Int) { y = satAdd(y, heightMpt) }
+
+    /** Whether a block of [heightMpt] starting at the pen ends below the content bottom (computed without overflow). */
+    fun overflows(heightMpt: Int) = y.toLong() + heightMpt > usableBottom
+
     fun newPage() {
         // Open box fragments close at the bottom of the page being left, before its frame changes.
         for (b in openBoxes) emitFragment(b, b.fragTop, usableBottom)
         page = Page(w, h).also { pages.add(it) }
         frame = frameFor(pages.lastIndex)
         y = topY
-        for (b in openBoxes) { b.fragTop = y; y += b.padPt }
+        for (b in openBoxes) { b.fragTop = y; advance(b.padMpt) }
     }
 
     fun openBox(b: BoxFrame) {
         b.fragTop = y
         openBoxes.add(b)
-        y += b.padPt
+        advance(b.padMpt)
     }
 
     fun closeBox(b: BoxFrame) {
-        y += b.padPt
+        advance(b.padMpt)
         emitFragment(b, b.fragTop, y)
         openBoxes.removeAt(openBoxes.lastIndex)
     }
@@ -488,10 +583,10 @@ private class Flow(
         val height = bottom - top
         if (height <= 0) return
         if (b.background != null) {
-            backgrounds.add(Triple(pages.size - 1, b.depth, RectOp(b.x, top, b.width, height, fill = b.background, stroke = null, strokeWidthPt = 0, cornerRadiusPt = b.cornerRadiusPt)))
+            backgrounds.add(Triple(pages.size - 1, b.depth, RectOp(b.x, top, b.width, height, fill = b.background, stroke = null, strokeWidthMpt = 0, cornerRadiusMpt = b.cornerRadiusMpt)))
         }
-        if (b.borderPt > 0) {
-            page.ops.add(RectOp(b.x, top, b.width, height, fill = null, stroke = b.borderColor, strokeWidthPt = b.borderPt, cornerRadiusPt = b.cornerRadiusPt))
+        if (b.borderMpt > 0) {
+            page.ops.add(RectOp(b.x, top, b.width, height, fill = null, stroke = b.borderColor, strokeWidthMpt = b.borderMpt, cornerRadiusMpt = b.cornerRadiusMpt))
         }
     }
 
@@ -506,22 +601,24 @@ private class Flow(
 
 /**
  * One flow pass: lays [spec]'s body out into pages whose content areas come from [frameFor] (asked
- * once per page, in page order, as each page opens). Bands are not drawn here — see [layoutDocument].
+ * once per page, in page order, as each page opens). The body spans the page width between the start
+ * and end margins. Bands are not drawn here — see [layoutDocument].
  */
 internal fun flowBody(spec: PdfDocumentSpec, book: TextMetrics, frameFor: (pageIndex: Int) -> PageFrame): List<Page> {
     val cfg = spec.config
-    val m = cfg.margin.value
+    val left = cfg.margins.start.mpt
+    val contentW = cfg.size.widthPt * MPT_PER_PT - left - cfg.margins.end.mpt
     val ctx = Flow(cfg.size.widthPt, cfg.size.heightPt, frameFor, book)
-    for (node in spec.nodes) flowNode(node, m, cfg.size.widthPt - 2 * m, ctx, cfg)
+    for (node in spec.nodes) flowNode(node, left, contentW, ctx, cfg)
     return ctx.finish()
 }
 
-/** Flows a list of sibling nodes with [gapPt] between them. */
-private fun flowNodes(nodes: List<Node>, x: Int, availW: Int, gapPt: Int, ctx: Flow, cfg: PageConfig) {
+/** Flows a list of sibling nodes with [gapMpt] between them. */
+private fun flowNodes(nodes: List<Node>, x: Int, availW: Int, gapMpt: Int, ctx: Flow, cfg: PageConfig) {
     for ((i, child) in nodes.withIndex()) {
         flowNode(child, x, availW, ctx, cfg)
-        if (gapPt > 0 && i < nodes.size - 1) {
-            ctx.y += gapPt
+        if (gapMpt > 0 && i < nodes.size - 1) {
+            ctx.advance(gapMpt)
             if (ctx.y > ctx.usableBottom) ctx.newPage()
         }
     }
@@ -530,26 +627,27 @@ private fun flowNodes(nodes: List<Node>, x: Int, availW: Int, gapPt: Int, ctx: F
 private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig) {
     when (node) {
         is SpacerNode -> {
-            ctx.y += node.heightPt
+            ctx.advance(node.heightMpt)
             if (ctx.y > ctx.usableBottom) ctx.newPage()
         }
         is DividerNode -> {
-            if (ctx.y + node.thicknessPt > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
-            ctx.page.ops.add(RectOp(x, ctx.y, availW, node.thicknessPt, fill = node.color, stroke = null, strokeWidthPt = 0))
-            ctx.y += node.thicknessPt
+            if (ctx.overflows(node.thicknessMpt) && ctx.y > ctx.topY) ctx.newPage()
+            ctx.page.ops.add(RectOp(x, ctx.y, availW, node.thicknessMpt, fill = node.color, stroke = null, strokeWidthMpt = 0))
+            ctx.advance(node.thicknessMpt)
         }
         is TextNode -> flowText(node, x, availW, ctx, cfg)
-        is ColumnNode -> flowNodes(node.children, x, availW, node.gapPt, ctx, cfg)
+        is ColumnNode -> flowNodes(node.children, x, availW, node.gapMpt, ctx, cfg)
         is BoxNode -> {
-            val pad = node.paddingPt
+            val pad = node.paddingMpt
             // Keep-together: a box that fits on a page is moved whole rather than split with its
-            // header orphaned at the page bottom. A box taller than a page still splits and flows.
+            // header orphaned at the page bottom. A box taller than a page — including one whose
+            // height saturated past `Int` — still splits and flows.
             if (cfg.keepBlocksTogether && ctx.y > ctx.topY) {
-                val boxH = measure(node, availW, ctx.book).heightPt
-                if (boxH <= ctx.usableBottom - ctx.topY && ctx.y + boxH > ctx.usableBottom) ctx.newPage()
+                val boxH = measure(node, availW, ctx.book).heightMpt
+                if (boxH <= ctx.usableBottom - ctx.topY && ctx.overflows(boxH)) ctx.newPage()
             }
-            if (ctx.y > ctx.topY && ctx.roomLeft() < MIN_BOX_OPEN_ROOM_PT) ctx.newPage()
-            val frame = BoxFrame(x, availW, pad, node.borderPt, node.borderColor, node.background, node.cornerRadiusPt, ctx.depth, ctx.y)
+            if (ctx.y > ctx.topY && ctx.roomLeft() < MIN_BOX_OPEN_ROOM_MPT) ctx.newPage()
+            val frame = BoxFrame(x, availW, pad, node.borderMpt, node.borderColor, node.background, node.cornerRadiusMpt, ctx.depth, ctx.y)
             ctx.openBox(frame)
             flowNode(node.child, x + pad, (availW - 2 * pad).coerceAtLeast(0), ctx, cfg)
             ctx.closeBox(frame)
@@ -559,7 +657,7 @@ private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig
             // Atomic — never split; move whole to the next page if it doesn't fit.
             val roomBefore = ctx.usableBottom - ctx.topY
             val natural = measure(node, availW, ctx.book)
-            if (ctx.y + natural.heightPt > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
+            if (ctx.overflows(natural.heightMpt) && ctx.y > ctx.topY) ctx.newPage()
             // An image/vector taller than the content area can never fit; clamp it so it doesn't draw
             // past the page bottom into the footer. The page it landed on may have less room than the
             // one it left (page-aware bands), hence the smaller of the two — without page-aware bands
@@ -568,39 +666,40 @@ private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig
             // than the content area overflows that page's bottom, as it always has.
             val room = minOf(roomBefore, ctx.usableBottom - ctx.topY)
             val p = when {
-                node is ImageNode && node.heightPt > room -> measure(node.withHeight(room), availW, ctx.book)
-                node is VectorNode && node.heightPt > room -> measure(node.withHeight(room), availW, ctx.book)
+                node is ImageNode && node.heightMpt > room -> measure(node.withHeight(room), availW, ctx.book)
+                node is VectorNode && node.heightMpt > room -> measure(node.withHeight(room), availW, ctx.book)
                 else -> natural
             }
             p.place(x, ctx.y, ctx.page.ops)
-            ctx.y += p.heightPt
+            ctx.advance(p.heightMpt)
         }
     }
 }
 
 private fun flowText(node: TextNode, x: Int, availW: Int, ctx: Flow, cfg: PageConfig) {
     val weight = node.style.fontWeight
-    val fs = node.style.fontSize.value
-    val lineH = (fs * node.style.lineHeightMultiple).toInt()
-    val ascent = ctx.book.ascentPt(weight, fs)
+    val fs = node.style.fontSize.mpt
+    val lineH = lineHeightMpt(fs, node.style.lineHeightMultiple)
+    val ascent = ctx.book.ascentMpt(weight, fs)
     val lines = LineBreaker.wrap(node.text, weight, fs, availW, ctx.book)
-    // Keep-together: a paragraph that fits on a page is moved whole rather than leaving a sliver.
-    val totalH = lines.size * lineH
-    if (cfg.keepBlocksTogether && ctx.y > ctx.topY && ctx.y + totalH > ctx.usableBottom && totalH <= ctx.usableBottom - ctx.topY) {
+    // Keep-together: a paragraph that fits on a page is moved whole rather than leaving a sliver. A
+    // height saturated past `Int` is taller than any page, so it flows line by line instead.
+    val totalH = satMul(lines.size, lineH)
+    if (cfg.keepBlocksTogether && ctx.y > ctx.topY && ctx.overflows(totalH) && totalH <= ctx.usableBottom - ctx.topY) {
         ctx.newPage()
     }
     for (line in lines) {
-        if (ctx.y + lineH > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
+        if (ctx.overflows(lineH) && ctx.y > ctx.topY) ctx.newPage()
         if (line.isNotEmpty()) {
-            val lw = ctx.book.measureWidthPt(line, weight, fs)
+            val lw = ctx.book.measureWidthMpt(line, weight, fs)
             val lx = when (node.style.align) {
                 TextAlign.Start -> x
-                TextAlign.Center -> x + (availW - lw) / 2
+                TextAlign.Center -> x + halfTrunc(availW - lw)
                 TextAlign.End -> x + (availW - lw)
             }
             ctx.book.placeLine(line, weight, fs, node.style.color, lx, ctx.y + ascent, ctx.page.ops)
         }
-        ctx.y += lineH
+        ctx.advance(lineH)
     }
 }
 
@@ -608,20 +707,20 @@ private fun flowTable(node: TableNode, x: Int, availW: Int, ctx: Flow, cfg: Page
     val colWidths = tableColumnWidths(node.columns, availW)
     val headerCells = node.columns.map { it.header }
     val aligns = node.columns.map { it.align }
-    val headerH = tableRowHeight(headerCells, node.headerStyle, colWidths, node.cellPadHPt, node.cellPadVPt, ctx.book)
+    val headerH = tableRowHeight(headerCells, node.headerStyle, colWidths, node.cellPadHMpt, node.cellPadVMpt, ctx.book)
     fun placeHeader() {
-        if (ctx.y + headerH > ctx.usableBottom && ctx.y > ctx.topY) ctx.newPage()
-        drawTableRow(headerCells, node.headerStyle, aligns, x, ctx.y, headerH, colWidths, node.cellPadHPt, node.cellPadVPt, node.headerBackground, node.gridColor, ctx.book, ctx.page.ops)
-        ctx.y += headerH
+        if (ctx.overflows(headerH) && ctx.y > ctx.topY) ctx.newPage()
+        drawTableRow(headerCells, node.headerStyle, aligns, x, ctx.y, headerH, colWidths, node.cellPadHMpt, node.cellPadVMpt, node.headerBackground, node.gridColor, ctx.book, ctx.page.ops)
+        ctx.advance(headerH)
     }
     placeHeader()
     for (row in node.rows) {
-        val rh = tableRowHeight(row.cells, row.style, colWidths, node.cellPadHPt, node.cellPadVPt, ctx.book)
-        if (ctx.y + rh > ctx.usableBottom && ctx.y > ctx.topY) {
+        val rh = tableRowHeight(row.cells, row.style, colWidths, node.cellPadHMpt, node.cellPadVMpt, ctx.book)
+        if (ctx.overflows(rh) && ctx.y > ctx.topY) {
             ctx.newPage()
             if (node.repeatHeader) placeHeader()
         }
-        drawTableRow(row.cells, row.style, aligns, x, ctx.y, rh, colWidths, node.cellPadHPt, node.cellPadVPt, row.background, node.gridColor, ctx.book, ctx.page.ops)
-        ctx.y += rh
+        drawTableRow(row.cells, row.style, aligns, x, ctx.y, rh, colWidths, node.cellPadHMpt, node.cellPadVMpt, row.background, node.gridColor, ctx.book, ctx.page.ops)
+        ctx.advance(rh)
     }
 }

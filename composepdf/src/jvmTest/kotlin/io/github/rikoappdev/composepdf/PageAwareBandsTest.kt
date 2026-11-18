@@ -489,7 +489,7 @@ class PageAwareBandsTest {
     }
 
     /** Per page, the baseline of the lowest body line. */
-    private fun bodyBottoms(spec: PdfDocumentSpec): List<Int> = spec.previewPages(regular(), bold()).map { p ->
+    private fun bodyBottoms(spec: PdfDocumentSpec): List<Float> = spec.previewPages(regular(), bold()).map { p ->
         p.ops.filterIsInstance<PreviewText>().filter { it.text.startsWith("Line ") }.maxOf { it.baselineYPt }
     }
 
@@ -642,11 +642,11 @@ class PageAwareBandsTest {
             assertEquals(2, pages.size, name)
             val last = pages[1]
             val bottom = when (val drawn = last.ops.single { it is ImageOp || it is VectorOp }) {
-                is ImageOp -> drawn.yPt + drawn.hPt
-                is VectorOp -> drawn.yPt + drawn.hPt
+                is ImageOp -> (drawn.yMpt + drawn.hMpt) / 1000
+                is VectorOp -> (drawn.yMpt + drawn.hMpt) / 1000
                 else -> error("unreachable")
             }
-            val footerTop = last.ops.filterIsInstance<TextOp>().minOf { it.baselineYPt - book.ascentPt(it.weight, it.fontSizePt) }
+            val footerTop = last.ops.filterIsInstance<TextOp>().minOf { it.baselineYMpt - book.ascentMpt(it.weight, it.fontSizeMpt) } / 1000
             assertEquals(12, footerTop - bottom, "$name: ends at $bottom, the last page's footer starts at $footerTop")
         }
     }
@@ -659,7 +659,7 @@ class PageAwareBandsTest {
 
     /** Bottom of the last 1-pt body rule on page 1 — rules stack until the content bottom. */
     private fun contentBottom(spec: PdfDocumentSpec, book: FontBook): Int =
-        layout(spec, book).first().ops.filterIsInstance<RectOp>().filter { it.fill === ruleColor }.maxOf { it.yPt + it.hPt }
+        layout(spec, book).first().ops.filterIsInstance<RectOp>().filter { it.fill === ruleColor }.maxOf { it.yMpt + it.hMpt } / 1000
 
     private fun ContainerScope.ruledBody() = repeat(1200) { divider(ruleColor, thickness = 1.dp) }
 
@@ -676,9 +676,9 @@ class PageAwareBandsTest {
         for (band in footers) {
             val page = layout(pdfDocument { footer(gap = 30.dp, build = band); text("Body") }, book).single()
             val rule = page.ops.filterIsInstance<RectOp>().single()
-            val number = page.ops.filterIsInstance<TextOp>().maxBy { it.baselineYPt }
-            assertEquals(numberTop, number.baselineYPt - book.ascentPt(style.fontWeight, style.fontSize.value))
-            assertEquals(12, numberTop - (rule.yPt + rule.hPt), "footer ↔ number line stays 12 pt whatever the gap")
+            val number = page.ops.filterIsInstance<TextOp>().maxBy { it.baselineYMpt }
+            assertEquals(numberTop, (number.baselineYMpt - book.ascentMpt(style.fontWeight, style.fontSize.mpt)) / 1000)
+            assertEquals(12, numberTop - (rule.yMpt + rule.hMpt) / 1000, "footer ↔ number line stays 12 pt whatever the gap")
         }
     }
 

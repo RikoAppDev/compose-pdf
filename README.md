@@ -15,7 +15,7 @@ To be *identical to the dot* **and** vector/searchable at once, **no per-platfor
 touch layout**, and the PDF must contain real text operators with an embedded font (so it can't be
 rasterized — and no public Kotlin Multiplatform PDF backend exists for vector output on iOS). So
 all layout, text shaping, glyph positioning, TrueType subsetting and PDF serialization run in
-shared `commonMain` **integer** math.
+shared `commonMain` **integer** math (fixed point, in thousandths of a point).
 
 **"Identical"** = every glyph's `(x,y)` origin and the extracted Unicode match across platforms
 (engineered to exact integer equality). Raw file bytes may differ (compression/float) — invisible
@@ -27,13 +27,15 @@ to users.
 - **Compose-style DSL**: `text`, `spacer`, `divider`, `row(verticalAlignment) { cell(weight) { } }` (a `cell(0f)` shrinks to its content's width — pair it with a `cell(1f) {}` spacer to push a logo / info block to an edge; `verticalAlignment` centres a short cell against a taller one), `column`, `box(padding, border, background)`, `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through **and PNG** — decoded in pure Kotlin to a `/FlateDecode` image with an `/SMask` for transparency; `PhotoFit.Cover` / `Contain` / `Smart` — smart preserves aspect but crops extreme strips; `align = HorizontalAlignment.Start` left-aligns a contained logo in a wide cell; both take a [`PdfImageSource`](#unbounded-documents-lazy-image-sources--renderto) instead of bytes to keep photo-heavy documents bounded), `table` (weighted columns, repeating header, total rows, optional `zebra` striping).
 - **Vector images (SVG + Android VectorDrawable)**: `vector(bytes, …)` imports both formats (auto-detected) into native, resolution-independent PDF **vector paths** — the full SVG/VectorDrawable path grammar (incl. elliptical arcs), basic shapes (`rect`/`circle`/`ellipse`/`line`/`poly…`), `<group>`/`transform`, nonzero & even-odd fill, stroke, per-element opacity, `currentColor` and the full CSS named-color set. Embedded as a reusable **Form XObject**, so a logo repeated in a header costs a single object. `align` (like `image`) left/center/right-aligns the logo inside its cell. Pure-Kotlin, dependency-free (no XML library).
 - **Header / footer / page numbers**: repeating `header`/`footer` bands and an auto page-number line whose space is reserved (content never overlaps it). Bands can be **page-aware**: read `page.number` / `page.total` / `page.isFirst` / `page.isLast` anywhere inside the block ("Page 3 / 12" next to a logo, a different first-page header, a last-page signature row); band height may differ per page, `gap` sets the band-to-content spacing. `PageConfig` controls the rest — `repeatHeader` (every page vs. first page only, like a title block), `pageNumberFormat`, `pageNumberStyle`, `pageNumbers`. See [Page-aware header & footer](#page-aware-header--footer).
-- Familiar value types: `TextStyle` (with `copy`), `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight`, `TextAlign`.
+- Familiar value types: `TextStyle` (with `copy`), `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight` (`Normal`, `Medium`, `Bold`), `TextAlign`.
+- **Fractional units & per-side margins**: `0.75.dp`, `14.6.dp`, `7.5.sp` are honored to 0.001 pt, and `PageConfig(margins = PageMargins(all = 36.dp, bottom = 14.6.dp))` sets each page margin separately — see [Fractional units & page margins](#fractional-units--page-margins).
+- **Medium weight**: `FontWeight.Medium` with an optional third face (`mediumFontBytes`); without it Medium text uses the Regular face — see [Medium weight](#medium-weight).
 - **Automatic pagination**: paragraphs split by line; tables split by row (repeating the header); bordered **boxes and columns split across pages** with the border/background redrawn per fragment; rows and images stay atomic (never cut). Optional keep-together moves a block whole instead of leaving a sliver.
 - **Color emoji**: pass an optional emoji font (`render(regular, bold, emoji)`) and emoji render as inline color bitmaps from `sbix` / `CBLC`+`CBDT` faces (the "phone" look) — see [Color emoji](#color-emoji). Opt-in; omit it and output is unchanged.
 - **Progress reporting**: `render(regular, bold, onProgress = { … })` calls the optional `onProgress: (Float) -> Unit` with `0f`→`1f` as pages are laid out and serialized — drive a real determinate progress bar. Omit it and output is byte-for-byte unchanged.
 - **Unbounded documents**: `image`/`photoGrid` take a [`PdfImageSource`](#unbounded-documents-lazy-image-sources--renderto) (`{ File(path).readBytes() }`) so JPEG photos are pulled one at a time and released, and `renderTo(sink, regular, bold)` writes the **byte-for-byte identical** PDF straight into a `PdfSink` instead of returning one array. Neither the photos nor the finished file ever exist whole — a measured 397 MB, 870-photo report streams in a 64 MiB heap, the case that OOMs photo-heavy exports on Android's default heap. `image(bytes)` stays for logos and small documents.
 - **FlateDecode compression**: content streams, the subset font program and the ToUnicode CMap are deflated by a pure-Kotlin encoder (deterministic on every platform).
-- Regular + Bold faces (bundled).
+- Regular + Bold faces (bundled), plus an optional Medium face you supply.
 
 ```kotlin
 val pdf: ByteArray = pdfDocument(PageConfig(margin = 36.dp)) {
@@ -85,6 +87,37 @@ val doc = pdfDocument(PageConfig(margin = 36.dp, pageNumbers = false)) {
 - Inside `header`/`footer` blocks a *member or top-level* symbol of your own named `page` is shadowed by
   `BandScope.page`; locals and parameters named `page` still win (and a band that then never reads
   `BandScope.page` stays static).
+
+## Fractional units & page margins
+
+`Dp` and `Sp` carry fractional values, and the page margin can differ per side:
+
+```kotlin
+val doc = pdfDocument(
+    PageConfig(margins = PageMargins(horizontal = 40.dp, top = 36.dp, bottom = 14.6.dp)),
+) {
+    header { text("Example Ltd.", TextStyle(fontSize = 7.5.sp)) }
+    footer { divider(thickness = 0.75.dp); text("example.com", TextStyle(fontSize = 7.5.sp)) }
+    // ... body ...
+}
+```
+
+- **Fractional values.** `0.75.dp`, `14.6.dp`, `7.5.sp` work next to whole ones (`8.sp`, `12.dp`). Lengths you
+  give (margins, spacers, dividers, paddings, gaps, borders, radii, image/vector boxes, font sizes) are honored
+  to 0.001 pt, with no float drift (four `2.5.dp` spacers add up to exactly 10 pt). `Dp.value` / `Sp.value` are `Float`.
+- **Rounding rule.** Quantities the engine derives are still rounded to whole points, exactly as before: text
+  widths and ascent, line height (`floor(fontSize x lineHeightMultiple)`), centring offsets, weighted row / column
+  widths, intrinsic image width. Images and vectors fitted into a box with a fractional side, and rounded corners
+  with a fractional radius, are placed to 0.001 pt. A document that uses only whole values renders
+  **byte-for-byte as in 0.10.0**. A `Dp` / `Sp` must be finite and within ±1,000,000.
+- **`PageMargins`** (`start`, `top`, `end`, `bottom`, each `>= 0`) cascades like Compose paddings:
+  `all` (default 36 dp) -> `horizontal` / `vertical` -> `start` / `top` / `end` / `bottom`. `start` is the left
+  and `end` the right edge (PDF has no RTL). `PageConfig.margin` stays as the all-sides shorthand; when `margins`
+  is passed it wins.
+- **Where it applies.** The body starts at `start` and is `page width - start - end` wide. The header's top edge
+  sits on the top margin, the footer's bottom edge (or the page-number line, when on) on the bottom margin, and the
+  body gets whatever is left on each page - measured per page, also for [page-aware bands](#page-aware-header--footer).
+  The page-number label is aligned (`pageNumberStyle.align`, centred by default) within the content width.
 
 ## Gallery
 
@@ -145,8 +178,12 @@ fun MyReportPreview() = PdfPreview(
   columns and alignment match the PDF; only the glyph shapes come from the platform font (a faithful
   approximation — the PDF stays the source of truth).
 - Targets **Android + JVM** (the platforms with an IDE preview runtime); the core engine remains
-  Android + iOS + JVM. The UI-free `PdfDocumentSpec.previewPages(regular, bold)` in the core returns
-  the resolved per-page draw model if you want to paint it on a different surface.
+  Android + iOS + JVM. The UI-free `PdfDocumentSpec.previewPages(regular, bold, mediumFontBytes = null)` in the core returns
+  the resolved per-page draw model if you want to paint it on a different surface. Its `PreviewText` /
+  `PreviewRect` numeric fields are `Float` (fractional units), and `PreviewText` carries `fontWeight`
+  (`bold` is kept).
+- Using `FontWeight.Medium`? Pass the Medium face as the **last** parameter, `PdfPreview(..., mediumFontBytes = medium)`
+  (there is no bundled Medium preview font); without it Medium text previews in the Regular face, as in the PDF.
 
 ## Fonts
 
@@ -166,6 +203,21 @@ val pdf = document.render(regular, bold)
 
 Any TrueType font works. For Latin diacritics (e.g. Czech/Slovak/Polish) pick a face that covers
 Latin Extended-A/B, such as Noto Sans or DejaVu Sans.
+
+### Medium weight
+
+`FontWeight.Medium` (CSS weight 500) sits between Normal and Bold. Pass the face as the optional **last**
+parameter of `render` / `renderTo`:
+
+```kotlin
+val medium: ByteArray = loadFont("NotoSans-Medium.ttf")
+val pdf = document.render(regular, bold, mediumFontBytes = medium)   // emoji and onProgress still optional
+```
+
+- With a Medium face, a third subset font is embedded (resources are ordered after Regular and Bold).
+- **Without** it, `Medium` text is set in the **Regular** face - measured and drawn exactly like `Normal`, no third
+  font embedded - following the CSS font-matching rule for weight 500 (try 500, then lighter, then heavier).
+- Documents that use only `Normal` / `Bold` are unchanged.
 
 ### Color emoji
 
@@ -258,4 +310,4 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 - Complex scripts / RTL / bidi.
 - Color **vector** emoji (`COLR`/`CPAL`) and ZWJ / skin-tone sequences.
 - Long-word breaking inside narrow columns.
-- Full-bleed bands (edge-to-edge colour bars), a band distance from the page edge different from `margin`, and separate top / bottom / left / right margins.
+- Full-bleed bands (edge-to-edge colour bars) and a band distance from the page edge different from the page margin.
