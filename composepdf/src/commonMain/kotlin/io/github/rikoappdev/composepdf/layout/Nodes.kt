@@ -43,12 +43,17 @@ internal class RowNode(
     val children: List<RowChild>,
     val gapMpt: Int,
     val valign: VerticalAlignment = VerticalAlignment.Top,
+    val split: Boolean = false,
+    val keepTogether: Boolean? = null,
 ) : Node
 internal class BoxNode(
     val child: Node,
-    val paddingMpt: Int,
+    val padHMpt: Int,
+    val padVMpt: Int,
     val borderMpt: Int,
     val borderColor: PdfColor,
     val background: PdfColor?,
     val cornerRadiusMpt: Int = 0,
+    val keepTogether: Boolean? = null,
+    val continuationHeader: ColumnNode? = null,
 ) : Node

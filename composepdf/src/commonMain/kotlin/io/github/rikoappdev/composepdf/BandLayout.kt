@@ -25,10 +25,22 @@ internal class PageFrame(val topY: Int, val usableBottom: Int) {
 internal class LayoutResult(
     val pages: List<Page>,
     val images: List<EmbeddedImage>,
-    /** How often the body was flowed: 1 when no band reads `page`, typically 2 when one does. */
+    /**
+     * How often the body was flowed in the accepted layout: 1 when no band reads `page`, typically 2
+     * when one does. A layout run again with the row safety net counts only its own passes.
+     */
     val flowPasses: Int = 1,
     /** True when the page count cycled and the max-reservation fallback settled it. */
     val usedFallback: Boolean = false,
+    /**
+     * For each flow pass of the first layout (the one without the row safety net), in order: whether
+     * a non-split row was drawn past a content bottom in it.
+     */
+    val rowCrossings: List<Boolean> = emptyList(),
+    /** True when that first layout's accepted pass had such a row, so this is the layout run again with the safety net on. */
+    val relaidWithGuard: Boolean = false,
+    /** True when that layout run again failed a layout check, so this is the first layout, unchanged. */
+    val guardedLayoutFailed: Boolean = false,
 )
 
 /** [layoutDocument] for callers that only need the pages and whose [book] adds no images (geometry
@@ -44,30 +56,84 @@ internal fun layout(spec: PdfDocumentSpec, book: TextMetrics): List<Page> =
  *
  * When no band reads `page`, every page's frame is known up front and the body is flowed once,
  * exactly as before page-aware bands existed. Otherwise [settle] finds the page count.
+ *
+ * Row safety net: the document is first laid out without it, exactly as in earlier releases. Only
+ * when that layout's accepted pass drew a non-split row past a content bottom is the whole layout —
+ * settling included, from the first guess — run again with the safety net on, which lays such rows
+ * out like split rows. A row that crosses only in a provisional settle pass (built with a provisional
+ * page count) therefore changes nothing, and every other document keeps its exact bytes. Images and
+ * emoji bitmaps the discarded layout added to [table] are dropped by the final compaction unless the
+ * accepted pages draw them, and [book]'s recorded glyphs and emoji are reset to what they were before
+ * the first layout, so the font subset and ToUnicode hold only what the second layout places.
+ * [overflowGuard] = `false` (tests only) never runs the second layout. A document that takes the
+ * second layout holds the first in memory until the second finishes (only documents that drew a row
+ * past the bottom).
+ *
+ * The safety net never turns a document that lays out into one that fails. The second layout can
+ * reach pages the first never built, where page-aware bands may leave no room, or settle more
+ * slowly; if it fails either layout check (no room on a page, a page count that does not settle),
+ * the first layout stands, exactly as without the safety net (rows drawn past the bottom), and
+ * [book]'s recorded glyphs and emoji are put back to what the first layout left, so the bytes are
+ * that layout's own. Anything else the second layout throws — from band code or image sources —
+ * propagates as always.
  */
 internal fun layoutDocument(
     spec: PdfDocumentSpec,
     book: TextMetrics,
     table: RenderImageTable,
     maxSettlePasses: Int = MAX_SETTLE_PASSES,
+    overflowGuard: Boolean = true,
 ): LayoutResult {
     val bands = BandBuilder(spec, book, table)
-    val laid = if (bands.pageAware) {
-        settle(spec, book, bands, maxSettlePasses)
+    val beforeFirst = book.checkpoint()
+    val first = paginate(spec, book, bands, maxSettlePasses, overflowGuard = false)
+    var guardFailed = false
+    val laid = if (overflowGuard && first.crossings.last()) {
+        val afterFirst = book.checkpoint()
+        beforeFirst() // nothing only the discarded layout placed stays in the font
+        try {
+            paginate(spec, book, bands, maxSettlePasses, overflowGuard = true)
+        } catch (failed: GuardedLayoutFailed) {
+            afterFirst() // the first layout stands, with exactly its own glyphs and emoji
+            guardFailed = true
+            first
+        }
     } else {
-        val built = ArrayList<PageBands>()
-        val pages = flowBody(spec, book) { i -> bands.forPage(i, total = i + 1).also { built += it }.frame }
-        Settled(pages, built, passes = 1, usedFallback = false)
+        first
     }
     drawBands(laid.pages, laid.bands, bands, book, spec.config)
-    return LayoutResult(laid.pages, compactImages(laid.pages, table.all), laid.passes, laid.usedFallback)
+    return LayoutResult(laid.pages, compactImages(laid.pages, table.all), laid.passes, laid.usedFallback, first.crossings, laid !== first, guardFailed)
+}
+
+/**
+ * Raised instead of a layout-check failure (bands leaving a page no room, a page count that does not
+ * settle) by the layout run again with the row safety net, so [layoutDocument] keeps the first layout.
+ * Its own type keeps every other failure — band code, image sources — out of that catch.
+ */
+private class GuardedLayoutFailed : RuntimeException()
+
+/** Flows the body once (no band reads `page`) or until the page count settles ([settle]). */
+private fun paginate(spec: PdfDocumentSpec, book: TextMetrics, bands: BandBuilder, maxSettlePasses: Int, overflowGuard: Boolean): Settled {
+    if (bands.pageAware) return settle(spec, book, bands, maxSettlePasses, overflowGuard)
+    val built = ArrayList<PageBands>()
+    val flowed = flowBody(spec, book, overflowGuard) { i -> bands.forPage(i, total = i + 1).also { built += it }.frame }
+    return Settled(flowed.pages, built, passes = 1, usedFallback = false, crossings = listOf(flowed.rowCrossedBottom))
 }
 
 /** One page's measured header and footer (`null` = none on that page) and the content frame they leave. */
 private class PageBands(val header: Placeable?, val footer: Placeable?, val frame: PageFrame)
 
-/** The accepted pass: its pages, the bands to draw on each, and how pagination got there. */
-private class Settled(val pages: List<Page>, val bands: List<PageBands>, val passes: Int, val usedFallback: Boolean)
+/**
+ * The accepted pass: its pages, the bands to draw on each, and how pagination got there — including,
+ * for every pass in order (the accepted one last), whether a non-split row crossed a content bottom.
+ */
+private class Settled(
+    val pages: List<Page>,
+    val bands: List<PageBands>,
+    val passes: Int,
+    val usedFallback: Boolean,
+    val crossings: List<Boolean>,
+)
 
 /**
  * Builds and measures each page's bands, and the frame they leave with each band reserving exactly
@@ -137,9 +203,14 @@ private class BandBuilder(spec: PdfDocumentSpec, private val book: TextMetrics, 
         return PageFrame(top, (pageH.toLong() - marginBottom - bottomReserve).saturatedToInt())
     }
 
-    /** Fails clearly instead of producing one page per element when bands leave page [index] no room. */
-    fun requireRoom(frame: PageFrame, index: Int) {
-        require(frame.usableBottom > frame.topY) { "Header and footer leave no room for content on page ${index + 1}" }
+    /**
+     * Fails clearly instead of producing one page per element when bands leave page [index] no room;
+     * in a [guarded] layout with [GuardedLayoutFailed], so the first layout is kept instead.
+     */
+    fun requireRoom(frame: PageFrame, index: Int, guarded: Boolean) {
+        if (frame.usableBottom > frame.topY) return
+        if (guarded) throw GuardedLayoutFailed()
+        throw IllegalArgumentException("Header and footer leave no room for content on page ${index + 1}")
     }
 }
 
@@ -170,30 +241,32 @@ private class BandBuilder(spec: PdfDocumentSpec, private val book: TextMetrics, 
  * total, and each band fits by construction (its frame is its exact frame narrowed by the
  * reservation), so its bands are the final ones without being built again.
  */
-private fun settle(spec: PdfDocumentSpec, book: TextMetrics, bands: BandBuilder, maxPasses: Int): Settled {
+private fun settle(spec: PdfDocumentSpec, book: TextMetrics, bands: BandBuilder, maxPasses: Int, overflowGuard: Boolean): Settled {
     var guess = 1
     // Until the fallback starts: each pass's guess and the frames of the pages it built with that guess.
     val history = ArrayList<Pair<Int, List<PageFrame>>>()
     var reserved: HashMap<Int, PageFrame>? = null // in the fallback, per page index: the tightest frame needed
+    val crossings = ArrayList<Boolean>()
     for (pass in 1..maxPasses) {
         val total = guess
         val built = ArrayList<PageBands>()
         val settled = ArrayList<PageFrame>() // frames of the pages before the guess, in page order
-        val pages = flowBody(spec, book) { i ->
+        val flowed = flowBody(spec, book, overflowGuard) { i ->
             val pageBands = bands.forPage(i, maxOf(total, i + 1))
             val frame = pageBands.frame.within(reserved?.get(i))
             if (i < total) {
-                if (pass > 1) bands.requireRoom(frame, i)
+                if (pass > 1) bands.requireRoom(frame, i, overflowGuard)
                 settled += frame
             }
             built += pageBands
             frame
         }
-        val n = pages.size
+        crossings += flowed.rowCrossedBottom
+        val n = flowed.pages.size
         if (n == total) {
             // Every page of an accepted pass lies before its guess; this covers an accepted pass 1.
-            for ((i, frame) in settled.withIndex()) bands.requireRoom(frame, i)
-            return Settled(pages, built, pass, usedFallback = reserved != null)
+            for ((i, frame) in settled.withIndex()) bands.requireRoom(frame, i, overflowGuard)
+            return Settled(flowed.pages, built, pass, usedFallback = reserved != null, crossings)
         }
         val inFallback = reserved
         if (inFallback != null) {
@@ -210,6 +283,7 @@ private fun settle(spec: PdfDocumentSpec, book: TextMetrics, bands: BandBuilder,
         }
         guess = n
     }
+    if (overflowGuard) throw GuardedLayoutFailed()
     throw IllegalStateException(
         "Pagination did not settle after $maxPasses passes: the header/footer heights depend on " +
             "the page count and keep changing it",

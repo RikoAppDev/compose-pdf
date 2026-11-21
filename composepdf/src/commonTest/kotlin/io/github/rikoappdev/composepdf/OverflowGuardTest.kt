@@ -45,7 +45,7 @@ class OverflowGuardTest {
         val text = tallText(10, 429_573) // 4,295,730 pt: past Int millipoints
         assertEquals(Int.MAX_VALUE, measure(text, 523_000, StubMetrics).heightMpt)
         assertEquals(Int.MAX_VALUE, measure(ColumnNode(listOf(text, text), 1_000), 523_000, StubMetrics).heightMpt)
-        assertEquals(Int.MAX_VALUE, measure(BoxNode(ColumnNode(listOf(text), 0), 4_000, 1_000, PdfColor.Black, null), 523_000, StubMetrics).heightMpt)
+        assertEquals(Int.MAX_VALUE, measure(BoxNode(ColumnNode(listOf(text), 0), 4_000, 4_000, 1_000, PdfColor.Black, null), 523_000, StubMetrics).heightMpt)
         assertEquals(Int.MAX_VALUE, measure(RowNode(listOf(RowChild(text, 1f)), 0), 523_000, StubMetrics).heightMpt)
         // Many children and gaps, each well inside Int, sum past it.
         val spacers = ColumnNode(List(3_000) { SpacerNode(0, 1_000_000) }, 1_000_000)

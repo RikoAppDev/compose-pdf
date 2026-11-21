@@ -24,13 +24,13 @@ to users.
 ## Features
 
 - Embedded **subset Type0/CIDFontType2 (Identity-H) + ToUnicode** → selectable & searchable text, including Latin diacritics (composite glyphs subset correctly).
-- **Compose-style DSL**: `text`, `spacer`, `divider`, `row(verticalAlignment) { cell(weight) { } }` (a `cell(0f)` shrinks to its content's width — pair it with a `cell(1f) {}` spacer to push a logo / info block to an edge; `verticalAlignment` centres a short cell against a taller one), `column`, `box(padding, border, background)`, `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through **and PNG** — decoded in pure Kotlin to a `/FlateDecode` image with an `/SMask` for transparency; `PhotoFit.Cover` / `Contain` / `Smart` — smart preserves aspect but crops extreme strips; `align = HorizontalAlignment.Start` left-aligns a contained logo in a wide cell; both take a [`PdfImageSource`](#unbounded-documents-lazy-image-sources--renderto) instead of bytes to keep photo-heavy documents bounded), `table` (weighted columns, repeating header, total rows, optional `zebra` striping).
+- **Compose-style DSL**: `text`, `spacer`, `divider`, `row(verticalAlignment) { cell(weight) { } }` (a `cell(0f)` shrinks to its content's width — pair it with a `cell(1f) {}` spacer to push a logo / info block to an edge; `verticalAlignment` centres a short cell against a taller one; `split = true` lets the cells continue across pages), `column`, `box(padding, border, background)` (per axis: `paddingHorizontal` / `paddingVertical`), `keyValue(label, value)`, `image` / `photoGrid` (JPEG `/DCTDecode` pass-through **and PNG** — decoded in pure Kotlin to a `/FlateDecode` image with an `/SMask` for transparency; `PhotoFit.Cover` / `Contain` / `Smart` — smart preserves aspect but crops extreme strips; `align = HorizontalAlignment.Start` left-aligns a contained logo in a wide cell; both take a [`PdfImageSource`](#unbounded-documents-lazy-image-sources--renderto) instead of bytes to keep photo-heavy documents bounded), `table` (weighted columns, repeating header, total rows, optional `zebra` striping).
 - **Vector images (SVG + Android VectorDrawable)**: `vector(bytes, …)` imports both formats (auto-detected) into native, resolution-independent PDF **vector paths** — the full SVG/VectorDrawable path grammar (incl. elliptical arcs), basic shapes (`rect`/`circle`/`ellipse`/`line`/`poly…`), `<group>`/`transform`, nonzero & even-odd fill, stroke, per-element opacity, `currentColor` and the full CSS named-color set. Embedded as a reusable **Form XObject**, so a logo repeated in a header costs a single object. `align` (like `image`) left/center/right-aligns the logo inside its cell. Pure-Kotlin, dependency-free (no XML library).
 - **Header / footer / page numbers**: repeating `header`/`footer` bands and an auto page-number line whose space is reserved (content never overlaps it). Bands can be **page-aware**: read `page.number` / `page.total` / `page.isFirst` / `page.isLast` anywhere inside the block ("Page 3 / 12" next to a logo, a different first-page header, a last-page signature row); band height may differ per page, `gap` sets the band-to-content spacing. `PageConfig` controls the rest — `repeatHeader` (every page vs. first page only, like a title block), `pageNumberFormat`, `pageNumberStyle`, `pageNumbers`. See [Page-aware header & footer](#page-aware-header--footer).
 - Familiar value types: `TextStyle` (with `copy`), `PdfColor`/`Color(0xFF…)`, `Dp`/`.dp`, `Sp`/`.sp`, `FontWeight` (`Normal`, `Medium`, `Bold`), `TextAlign`.
 - **Fractional units & per-side margins**: `0.75.dp`, `14.6.dp`, `7.5.sp` are honored to 0.001 pt, and `PageConfig(margins = PageMargins(all = 36.dp, bottom = 14.6.dp))` sets each page margin separately — see [Fractional units & page margins](#fractional-units--page-margins).
 - **Medium weight**: `FontWeight.Medium` with an optional third face (`mediumFontBytes`); without it Medium text uses the Regular face — see [Medium weight](#medium-weight).
-- **Automatic pagination**: paragraphs split by line; tables split by row (repeating the header); bordered **boxes and columns split across pages** with the border/background redrawn per fragment; rows and images stay atomic (never cut). Optional keep-together moves a block whole instead of leaving a sliver.
+- **Automatic pagination**: paragraphs split by line; tables split by row (repeating the header); bordered **boxes and columns split across pages** with the border/background redrawn per fragment; images and rows move whole, unless a row is marked **`row(split = true)`** — then its cells continue across pages side by side. Keep-together moves a block whole instead of leaving a sliver, for the whole document or per `box` / split row (`keepTogether`). A box can repeat a **continuation header** at the top of every page it continues on, and a row taller than a page is split instead of running into the footer. See [Long content](#long-content-split-rows-keep-together-continuation-headers).
 - **Color emoji**: pass an optional emoji font (`render(regular, bold, emoji)`) and emoji render as inline color bitmaps from `sbix` / `CBLC`+`CBDT` faces (the "phone" look) — see [Color emoji](#color-emoji). Opt-in; omit it and output is unchanged.
 - **Progress reporting**: `render(regular, bold, onProgress = { … })` calls the optional `onProgress: (Float) -> Unit` with `0f`→`1f` as pages are laid out and serialized — drive a real determinate progress bar. Omit it and output is byte-for-byte unchanged.
 - **Unbounded documents**: `image`/`photoGrid` take a [`PdfImageSource`](#unbounded-documents-lazy-image-sources--renderto) (`{ File(path).readBytes() }`) so JPEG photos are pulled one at a time and released, and `renderTo(sink, regular, bold)` writes the **byte-for-byte identical** PDF straight into a `PdfSink` instead of returning one array. Neither the photos nor the finished file ever exist whole — a measured 397 MB, 870-photo report streams in a 64 MiB heap, the case that OOMs photo-heavy exports on Android's default heap. `image(bytes)` stays for logos and small documents.
@@ -118,6 +118,77 @@ val doc = pdfDocument(
   sits on the top margin, the footer's bottom edge (or the page-number line, when on) on the bottom margin, and the
   body gets whatever is left on each page - measured per page, also for [page-aware bands](#page-aware-header--footer).
   The page-number label is aligned (`pageNumberStyle.align`, centred by default) within the content width.
+
+## Long content: split rows, keep-together, continuation headers
+
+A long card (a bordered box with a title bar and two columns of lines) can run across pages: the columns
+continue independently, every continuation page starts with the card's title marked "(continued)", and a card
+that fits on a page still moves whole to the next one.
+
+```kotlin
+fun ContainerScope.card(title: String, left: List<Pair<String, String>>, right: List<Pair<String, String>>) {
+    val bold = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Bold)
+    val bar = Color(0xFFF1F3F5)
+    box(
+        border = 1.dp,
+        cornerRadius = 6.dp,
+        // Drawn at the top of every page the card continues on (never on its first page).
+        continuationHeader = { box(padding = 8.dp, background = bar) { text("$title (continued)", bold) } },
+    ) {
+        box(padding = 8.dp, background = bar) { text(title, bold) }
+        // keepTogether = false: start right below the title bar instead of moving to the next page.
+        box(paddingHorizontal = 12.dp, paddingVertical = 8.dp, keepTogether = false) {
+            // split = true: both columns continue on the next page, each on its own.
+            row(gap = 16.dp, split = true, keepTogether = false) {
+                cell(1f) { left.forEach { (label, value) -> keyValue(label, value) } }
+                cell(1f) { right.forEach { (label, value) -> keyValue(label, value) } }
+            }
+        }
+    }
+}
+```
+
+- **`row(split = true)`.** A split row that fits the room left is placed exactly like any other row. One that
+  does not lets its cells start side by side at the row's top and flow on their own, splitting as finely as
+  top-level content: text by lines, boxes into fragments (border and background redrawn), tables row by row
+  (header repeated when the table's `repeatHeader` is true, the default), nested split rows in turn. Single
+  lines, table rows, images and non-split rows inside a cell stay whole (an image taller than the page is
+  shrunk to it, a non-split row taller than the page is split as described below). On every new page all cells
+  resume at the same height, below the padding (and continuation headers) of the boxes around the row, and the
+  row ends below its longest cell. A row that splits is laid out
+  **top-aligned** whatever `verticalAlignment` says (centring and bottom alignment cannot hold across pages).
+- **`keepTogether`** on `box` and on split rows: `null` (default) follows `PageConfig.keepBlocksTogether`, `true`
+  moves the block whole to the next page when it fits an empty page but not the room left (even with the document
+  setting off), `false` starts it where it stands and lets it split. A box never opens with less than 28 pt of room
+  left on the page, and neither does a split row that does not fit: either starts on the next page instead. Rows
+  that are not split always move whole when they do not fit; `keepTogether` does not apply to them.
+  `keepTogether` applies to the row as a whole: blocks inside a cell keep their own rules. A paragraph or box that
+  fits a page may still move to the next page under `PageConfig.keepBlocksTogether` or its own `keepTogether`,
+  which can leave that cell empty on the row's first page.
+- **`box(continuationHeader = { ... })`** is drawn at the top of every continuation fragment of the box (never the
+  first): inside its padding, at its inner width, placed whole, with the fragment's content starting below it. It
+  is **skipped on a page where it does not fit** between the fragment's top padding and the content bottom, so it
+  never runs into the footer. Keep-together measures the box without it: with keep-together on, a box that fits an
+  empty page moves whole and never shows its header. It works with [page-aware bands](#page-aware-header--footer) (a different
+  content area per page); an empty block is the same as no header. Keep headers short: if a header fits but leaves
+  less room than one line of content, that content may run past the content bottom on continuation pages.
+- **Spacing never opens a continuation.** While a box with a continuation header is open, and inside the cells of
+  a split row, a spacer or a gap that runs past the page bottom is dropped at the break instead of starting a new
+  page, so no page holds only a header and spacing; the next content, if any, starts the next page as usual.
+  Elsewhere spacing breaks pages as before.
+- **Rows taller than a page.** A non-split row that still does not fit after moving to the next page (one taller
+  than the content area) is split from there like a split row, instead of running into the footer and off the
+  page - `keyValue` and `photoGrid` rows included. Rows that fit after moving are untouched. The safety net first
+  moves the row, as earlier releases did, so a tall non-split row that is the first thing in a padded box can leave
+  the box's first fragment empty before it splits; `row(split = true)` avoids that, because it starts splitting at
+  the pen. If laying the document
+  out that way fails a layout check (page-aware bands leave a page no room, or the page count does not settle), it
+  is laid out as before, with the row drawn past the bottom, rather than failing.
+- **Per-axis box padding.** `paddingHorizontal` (left and right) and `paddingVertical` (top and bottom) override
+  `padding`, like `table(cellPaddingHorizontal, cellPaddingVertical)`; the top padding is repeated at the top of
+  each continuation fragment.
+- A document that uses none of these options and never drew a row past the content bottom renders
+  **byte-for-byte as in 0.11.0**.
 
 ## Gallery
 
@@ -311,3 +382,5 @@ Generated test PDFs/PNGs are written under `composepdf/build/`.
 - Color **vector** emoji (`COLR`/`CPAL`) and ZWJ / skin-tone sequences.
 - Long-word breaking inside narrow columns.
 - Full-bleed bands (edge-to-edge colour bars) and a band distance from the page edge different from the page margin.
+- Finer pagination control: widow / orphan rules, break-before / break-after hints, balanced columns, and
+  splitting a single table row taller than a page.

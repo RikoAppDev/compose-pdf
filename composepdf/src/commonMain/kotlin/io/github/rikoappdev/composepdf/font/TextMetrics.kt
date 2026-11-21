@@ -51,4 +51,11 @@ internal interface TextMetrics {
         if (line.isEmpty()) return
         out.add(TextOp(xMpt, baselineYMpt, shape(line, w), w, fontSizeMpt, color))
     }
+
+    /**
+     * Captures what this instance has recorded for embedding so far (used glyphs, their code points,
+     * decoded emoji); calling the returned function puts exactly that back. A layout attempt that is
+     * thrown away uses it so the output carries nothing of it. The default records nothing.
+     */
+    fun checkpoint(): () -> Unit = {}
 }

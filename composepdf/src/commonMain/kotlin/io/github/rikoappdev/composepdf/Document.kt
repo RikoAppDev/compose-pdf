@@ -1,7 +1,6 @@
 package io.github.rikoappdev.composepdf
 
 import io.github.rikoappdev.composepdf.font.FontBook
-import io.github.rikoappdev.composepdf.font.TextMetrics
 import io.github.rikoappdev.composepdf.layout.BoxNode
 import io.github.rikoappdev.composepdf.layout.ColumnNode
 import io.github.rikoappdev.composepdf.layout.DividerNode
@@ -15,16 +14,9 @@ import io.github.rikoappdev.composepdf.layout.TableNode
 import io.github.rikoappdev.composepdf.layout.TableRow
 import io.github.rikoappdev.composepdf.layout.TextNode
 import io.github.rikoappdev.composepdf.layout.VectorNode
-import io.github.rikoappdev.composepdf.layout.drawTableRow
-import io.github.rikoappdev.composepdf.layout.measure
-import io.github.rikoappdev.composepdf.layout.tableColumnWidths
-import io.github.rikoappdev.composepdf.layout.tableRowHeight
 import io.github.rikoappdev.composepdf.pdf.EmbeddedImage
 import io.github.rikoappdev.composepdf.pdf.serializePdf
 import io.github.rikoappdev.composepdf.pdf.serializePdfTo
-import io.github.rikoappdev.composepdf.render.Page
-import io.github.rikoappdev.composepdf.render.RectOp
-import io.github.rikoappdev.composepdf.text.LineBreaker
 import kotlin.jvm.JvmName
 import kotlin.math.abs
 import kotlin.math.floor
@@ -127,11 +119,16 @@ class PageConfig(
      *  first page and later pages reclaim that space (like a title block in Word / Google Docs). */
     val repeatHeader: Boolean = true,
     /**
-     * When true (default), a paragraph that fits within a single page is moved **whole** to the next
-     * page instead of being split, when it doesn't fit the remaining space — so a block never leaves
-     * an awkward sliver at the bottom of a page. Paragraphs taller than a full page still split and
-     * flow across pages. Atomic blocks (boxes, rows, images, tables) already move whole when they
-     * don't fit.
+     * When true (default), a paragraph, a box or a split row (`row(split = true)`) that fits within a
+     * single page is moved **whole** to the next page instead of being split when it doesn't fit the
+     * remaining space — so a block never leaves an awkward sliver at the bottom of a page. Blocks
+     * taller than a full page still split and flow across pages. A box or a split row can override
+     * this setting with its own `keepTogether` (`null` follows it).
+     *
+     * Rows that are not split, images and vectors are atomic: they move whole to the next page when
+     * they don't fit, whatever this says. A non-split row that would still cross the content bottom
+     * from there (one taller than the content area) is split instead (see [ContainerScope.row]).
+     * Tables split row by row.
      */
     val keepBlocksTogether: Boolean = true,
     /** Per-side page margins (see [PageMargins]); defaults to [margin] on every side. */
@@ -157,10 +154,56 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
      * A horizontal row of weighted [cell]s. [gap] is inserted between cells; [verticalAlignment]
      * places each cell within the row's height (the tallest cell) — handy to vertically centre a
      * short logo next to a taller text block.
+     *
+     * A row is atomic by default: when it does not fit the room left on the page it moves whole to
+     * the next one. If it would still cross the content bottom from there (a row taller than the
+     * content area), it is split instead, exactly like a split row that does not fit (below), so it
+     * does not run into the footer or off the page; [keyValue] and [photoGrid] rows included. The one
+     * exception: if laying the document out that way fails a layout check (page-aware bands leave a
+     * page no room, or the page count does not settle), the document is laid out as in earlier
+     * releases, with the row drawn past the bottom, rather than failing. A row that fits after moving
+     * is unaffected. The safety net first moves the row, as earlier releases did, so a tall non-split
+     * row that is the first thing in a padded box can leave the box's first fragment empty before it
+     * splits; [split] avoids that, because it starts splitting at the pen. To let a row split where it
+     * stands instead of moving first, use [split].
+     *
+     * With [split] = `true`, a row that does not fit lets its cells continue across
+     * pages instead: the cells start side by side at the row's top and each flows on its own, splitting
+     * as finely as top-level content does — text by lines, boxes into fragments (border and background
+     * redrawn on each page), tables row by row (header repeated when the table's `repeatHeader` is
+     * true, the default), nested split rows in turn. Single lines, table rows, images and non-split
+     * rows inside a cell stay whole (an image taller than the page is shrunk to it, a non-split row
+     * taller than the page splits as above). On every new page all cells resume at the same height,
+     * below the padding (and continuation headers) of the boxes around the row, and the row ends below
+     * its longest cell. Spacing in a cell (a spacer, a column gap) that runs past the page bottom
+     * is dropped at the break instead of being carried to the next page, so no cell is continued on a
+     * page just for its spacing. A row that splits is laid out top-aligned whatever
+     * [verticalAlignment] says (centring and bottom alignment cannot hold across pages); a split row
+     * that fits is placed exactly like a non-split one, aligned as asked.
+     *
+     * [keepTogether] applies to split rows only (a non-split row that does not fit moves, as above):
+     * `null` follows [PageConfig.keepBlocksTogether], `true` moves the row whole to the next page when
+     * it fits an empty page but not the room left, and `false` starts it at the current position. A
+     * split row that does not fit is never started below the top of a page with less than 28 pt of
+     * room left: it starts on the next page instead. [keepTogether] applies to the row as a whole;
+     * blocks inside a cell keep their own rules, so a paragraph or box that fits a page may still move
+     * to the next page under [PageConfig.keepBlocksTogether] or its own `keepTogether`, which can
+     * leave that cell empty on the row's first page.
      */
-    fun row(gap: Dp = 0.dp, verticalAlignment: VerticalAlignment = VerticalAlignment.Top, build: RowScope.() -> Unit) {
-        nodes.add(RowScope(registry).apply(build).toNode(gap.mpt, verticalAlignment))
+    fun row(
+        gap: Dp = 0.dp,
+        verticalAlignment: VerticalAlignment = VerticalAlignment.Top,
+        split: Boolean = false,
+        keepTogether: Boolean? = null,
+        build: RowScope.() -> Unit,
+    ) {
+        nodes.add(RowScope(registry).apply(build).toNode(gap.mpt, verticalAlignment, split, keepTogether))
     }
+
+    /** Binary-compatible entry point of the previous release; use the overload with `split`. */
+    @Deprecated("Kept for binary compatibility", level = DeprecationLevel.HIDDEN)
+    fun row(gap: Dp = 0.dp, verticalAlignment: VerticalAlignment = VerticalAlignment.Top, build: RowScope.() -> Unit) =
+        row(gap, verticalAlignment, false, null, build)
 
     /** A label/value line: [label] on the left, [value] right-aligned. Common in detail reports. */
     fun keyValue(
@@ -176,6 +219,65 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
         }
     }
 
+    /**
+     * A container with optional padding, border, background and rounded corners. It splits across
+     * pages (border and background are redrawn on each fragment) unless it fits an empty page but
+     * not the room left, in which case it moves whole to the next page (keep-together, on by
+     * default; see [keepTogether]).
+     *
+     * [padding] insets the content on every side; [paddingHorizontal] (left and right) and
+     * [paddingVertical] (top and bottom) override it per axis. [keepTogether] overrides
+     * [PageConfig.keepBlocksTogether] for this box: `null` follows the document setting, `true`
+     * moves the box whole to the next page when it fits an empty page but not the room left, `false`
+     * starts it at the current position and lets it split. A box is never opened with less than
+     * 28 pt of room left, whatever [keepTogether] says.
+     *
+     * [continuationHeader], when set, is drawn at the top of every continuation fragment of the box,
+     * that is on each page after the first one it spans (never on the first): inside the padding, at
+     * the box's inner width, placed whole like a band, and the fragment's content starts below it.
+     * On a page where it does not fit between the fragment's top padding and the page bottom it is
+     * skipped, so it never runs into the footer. A header that fits but leaves less room than one
+     * line of content still takes its place, and that content may then run past the content bottom
+     * on continuation pages, so keep headers short. A block that adds nothing is the same as no
+     * header. Keep-together decides on the box's own height, so when it applies a box that fits an
+     * empty page moves whole and never shows its header. While such a box is open, a spacer or a
+     * column gap that runs past the page bottom is dropped at the break instead of starting a new
+     * page, so no continuation fragment holds only the header and spacing: the next content, if
+     * any, starts the next page as usual.
+     */
+    fun box(
+        padding: Dp = 0.dp,
+        border: Dp = 0.dp,
+        borderColor: PdfColor = Color(0xFF6C757D),
+        background: PdfColor? = null,
+        cornerRadius: Dp = 0.dp,
+        paddingHorizontal: Dp = padding,
+        paddingVertical: Dp = padding,
+        keepTogether: Boolean? = null,
+        continuationHeader: (ContainerScope.() -> Unit)? = null,
+        build: ContainerScope.() -> Unit,
+    ) {
+        nodes.add(
+            BoxNode(
+                child = ColumnNode(ContainerScope(registry).apply(build).nodes, 0),
+                padHMpt = paddingHorizontal.mpt,
+                padVMpt = paddingVertical.mpt,
+                borderMpt = border.mpt,
+                borderColor = borderColor,
+                background = background,
+                cornerRadiusMpt = cornerRadius.mpt,
+                keepTogether = keepTogether,
+                // A header block that adds nothing is no header: it neither draws nor changes the flow.
+                continuationHeader = continuationHeader
+                    ?.let { ContainerScope(registry).apply(it).nodes }
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { ColumnNode(it, 0) },
+            )
+        )
+    }
+
+    /** Binary-compatible entry point of the previous release; use the overload with `paddingHorizontal`. */
+    @Deprecated("Kept for binary compatibility", level = DeprecationLevel.HIDDEN)
     fun box(
         padding: Dp = 0.dp,
         border: Dp = 0.dp,
@@ -183,18 +285,7 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
         background: PdfColor? = null,
         cornerRadius: Dp = 0.dp,
         build: ContainerScope.() -> Unit,
-    ) {
-        nodes.add(
-            BoxNode(
-                child = ColumnNode(ContainerScope(registry).apply(build).nodes, 0),
-                paddingMpt = padding.mpt,
-                borderMpt = border.mpt,
-                borderColor = borderColor,
-                background = background,
-                cornerRadiusMpt = cornerRadius.mpt,
-            )
-        )
-    }
+    ) = box(padding, border, borderColor, background, cornerRadius, padding, padding, null, null, build)
 
     /**
      * Embeds an image pulled from a [PdfImageSource] — a file, a content-provider stream, a cache
@@ -289,9 +380,16 @@ open class ContainerScope internal constructor(internal val registry: ImageRegis
         }
     }
 
-    /** A table with weighted columns, a repeating header, body rows and bold total rows.
-     *  At the document top level it splits across pages (repeating the header); nested inside a
-     *  container it is placed atomically. */
+    /**
+     * A table with weighted columns, a repeating header, body rows and bold total rows.
+     *
+     * Wherever it is flowed — at the document top level, in a [column], a [box] or a cell of a split
+     * [row] — it splits across pages row by row, repeating the header on each new page when
+     * [repeatHeader] is true. Inside a row that is not split, a header / footer band or a box's
+     * continuation header it is measured and placed whole, as part of that block — except in a
+     * non-split row that is split because it would cross the content bottom (see [row]), whose cells
+     * flow like a split row's.
+     */
     fun table(
         columns: List<PdfColumn>,
         headerStyle: TextStyle = TextStyle(fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF212529)),
@@ -362,7 +460,8 @@ class RowScope internal constructor(private val registry: ImageRegistry) {
         cells.add(RowChild(ColumnNode(ContainerScope(registry).apply(build).nodes, 0), weight))
     }
 
-    internal fun toNode(gapMpt: Int, valign: VerticalAlignment) = RowNode(cells.toList(), gapMpt, valign)
+    internal fun toNode(gapMpt: Int, valign: VerticalAlignment, split: Boolean, keepTogether: Boolean?) =
+        RowNode(cells.toList(), gapMpt, valign, split, keepTogether)
 }
 
 class PdfContentScope internal constructor(registry: ImageRegistry) : ContainerScope(registry) {
@@ -508,219 +607,5 @@ class PdfDocumentSpec internal constructor(
         val result = layoutDocument(this, book, table)
         onProgress?.invoke(0f)
         serializePdfTo(sink, result.pages, book, result.images, onProgress)
-    }
-}
-
-/** Don't open a box with less than this much vertical room left (28 pt) — avoids an empty box sliver. */
-private const val MIN_BOX_OPEN_ROOM_MPT = 28 * MPT_PER_PT
-
-/** A box currently being flowed; tracks the top of its fragment on the current page. Millipoints. */
-private class BoxFrame(
-    val x: Int,
-    val width: Int,
-    val padMpt: Int,
-    val borderMpt: Int,
-    val borderColor: PdfColor,
-    val background: PdfColor?,
-    val cornerRadiusMpt: Int,
-    val depth: Int,
-    var fragTop: Int,
-)
-
-/**
- * Single-pass page flow. Text and tables flow line/row-by-row; boxes and columns split across pages
- * (their border/background is redrawn per page fragment); rows and images are atomic (never split).
- * Each page's content area comes from [frameFor], asked once per page as the page opens, so bands
- * may reserve a different height on every page. [w] / [h] are the page size in whole points; every
- * position is an integer in millipoints → identical placement on every platform.
- */
-private class Flow(
-    val w: Int,
-    val h: Int,
-    private val frameFor: (pageIndex: Int) -> PageFrame,
-    val book: TextMetrics,
-) {
-    val pages = ArrayList<Page>()
-    var page = Page(w, h).also { pages.add(it) }
-    private var frame = frameFor(0)
-    val topY get() = frame.topY                 // content top on the current page
-    val usableBottom get() = frame.usableBottom // content bottom on the current page
-    var y = topY
-    private val openBoxes = ArrayList<BoxFrame>()
-    private val backgrounds = ArrayList<Triple<Int, Int, RectOp>>() // (pageIndex, depth, rect)
-
-    val depth get() = openBoxes.size
-    fun roomLeft() = usableBottom - y
-
-    /** Moves the pen down by [heightMpt], saturating: a block taller than `Int` leaves the pen past every page bottom. */
-    fun advance(heightMpt: Int) { y = satAdd(y, heightMpt) }
-
-    /** Whether a block of [heightMpt] starting at the pen ends below the content bottom (computed without overflow). */
-    fun overflows(heightMpt: Int) = y.toLong() + heightMpt > usableBottom
-
-    fun newPage() {
-        // Open box fragments close at the bottom of the page being left, before its frame changes.
-        for (b in openBoxes) emitFragment(b, b.fragTop, usableBottom)
-        page = Page(w, h).also { pages.add(it) }
-        frame = frameFor(pages.lastIndex)
-        y = topY
-        for (b in openBoxes) { b.fragTop = y; advance(b.padMpt) }
-    }
-
-    fun openBox(b: BoxFrame) {
-        b.fragTop = y
-        openBoxes.add(b)
-        advance(b.padMpt)
-    }
-
-    fun closeBox(b: BoxFrame) {
-        advance(b.padMpt)
-        emitFragment(b, b.fragTop, y)
-        openBoxes.removeAt(openBoxes.lastIndex)
-    }
-
-    private fun emitFragment(b: BoxFrame, top: Int, bottom: Int) {
-        val height = bottom - top
-        if (height <= 0) return
-        if (b.background != null) {
-            backgrounds.add(Triple(pages.size - 1, b.depth, RectOp(b.x, top, b.width, height, fill = b.background, stroke = null, strokeWidthMpt = 0, cornerRadiusMpt = b.cornerRadiusMpt)))
-        }
-        if (b.borderMpt > 0) {
-            page.ops.add(RectOp(b.x, top, b.width, height, fill = null, stroke = b.borderColor, strokeWidthMpt = b.borderMpt, cornerRadiusMpt = b.cornerRadiusMpt))
-        }
-    }
-
-    fun finish(): List<Page> {
-        // Backgrounds go behind content; outer boxes (lower depth) behind inner ones.
-        for ((pi, list) in backgrounds.groupBy { it.first }) {
-            pages[pi].ops.addAll(0, list.sortedBy { it.second }.map { it.third })
-        }
-        return pages
-    }
-}
-
-/**
- * One flow pass: lays [spec]'s body out into pages whose content areas come from [frameFor] (asked
- * once per page, in page order, as each page opens). The body spans the page width between the start
- * and end margins. Bands are not drawn here — see [layoutDocument].
- */
-internal fun flowBody(spec: PdfDocumentSpec, book: TextMetrics, frameFor: (pageIndex: Int) -> PageFrame): List<Page> {
-    val cfg = spec.config
-    val left = cfg.margins.start.mpt
-    val contentW = cfg.size.widthPt * MPT_PER_PT - left - cfg.margins.end.mpt
-    val ctx = Flow(cfg.size.widthPt, cfg.size.heightPt, frameFor, book)
-    for (node in spec.nodes) flowNode(node, left, contentW, ctx, cfg)
-    return ctx.finish()
-}
-
-/** Flows a list of sibling nodes with [gapMpt] between them. */
-private fun flowNodes(nodes: List<Node>, x: Int, availW: Int, gapMpt: Int, ctx: Flow, cfg: PageConfig) {
-    for ((i, child) in nodes.withIndex()) {
-        flowNode(child, x, availW, ctx, cfg)
-        if (gapMpt > 0 && i < nodes.size - 1) {
-            ctx.advance(gapMpt)
-            if (ctx.y > ctx.usableBottom) ctx.newPage()
-        }
-    }
-}
-
-private fun flowNode(node: Node, x: Int, availW: Int, ctx: Flow, cfg: PageConfig) {
-    when (node) {
-        is SpacerNode -> {
-            ctx.advance(node.heightMpt)
-            if (ctx.y > ctx.usableBottom) ctx.newPage()
-        }
-        is DividerNode -> {
-            if (ctx.overflows(node.thicknessMpt) && ctx.y > ctx.topY) ctx.newPage()
-            ctx.page.ops.add(RectOp(x, ctx.y, availW, node.thicknessMpt, fill = node.color, stroke = null, strokeWidthMpt = 0))
-            ctx.advance(node.thicknessMpt)
-        }
-        is TextNode -> flowText(node, x, availW, ctx, cfg)
-        is ColumnNode -> flowNodes(node.children, x, availW, node.gapMpt, ctx, cfg)
-        is BoxNode -> {
-            val pad = node.paddingMpt
-            // Keep-together: a box that fits on a page is moved whole rather than split with its
-            // header orphaned at the page bottom. A box taller than a page — including one whose
-            // height saturated past `Int` — still splits and flows.
-            if (cfg.keepBlocksTogether && ctx.y > ctx.topY) {
-                val boxH = measure(node, availW, ctx.book).heightMpt
-                if (boxH <= ctx.usableBottom - ctx.topY && ctx.overflows(boxH)) ctx.newPage()
-            }
-            if (ctx.y > ctx.topY && ctx.roomLeft() < MIN_BOX_OPEN_ROOM_MPT) ctx.newPage()
-            val frame = BoxFrame(x, availW, pad, node.borderMpt, node.borderColor, node.background, node.cornerRadiusMpt, ctx.depth, ctx.y)
-            ctx.openBox(frame)
-            flowNode(node.child, x + pad, (availW - 2 * pad).coerceAtLeast(0), ctx, cfg)
-            ctx.closeBox(frame)
-        }
-        is TableNode -> flowTable(node, x, availW, ctx, cfg)
-        is RowNode, is ImageNode, is VectorNode -> {
-            // Atomic — never split; move whole to the next page if it doesn't fit.
-            val roomBefore = ctx.usableBottom - ctx.topY
-            val natural = measure(node, availW, ctx.book)
-            if (ctx.overflows(natural.heightMpt) && ctx.y > ctx.topY) ctx.newPage()
-            // An image/vector taller than the content area can never fit; clamp it so it doesn't draw
-            // past the page bottom into the footer. The page it landed on may have less room than the
-            // one it left (page-aware bands), hence the smaller of the two — without page-aware bands
-            // the next page never has less, so this is the old clamp. Valid documents use heights far
-            // smaller than a page, so this never triggers for them. A row cannot shrink: one taller
-            // than the content area overflows that page's bottom, as it always has.
-            val room = minOf(roomBefore, ctx.usableBottom - ctx.topY)
-            val p = when {
-                node is ImageNode && node.heightMpt > room -> measure(node.withHeight(room), availW, ctx.book)
-                node is VectorNode && node.heightMpt > room -> measure(node.withHeight(room), availW, ctx.book)
-                else -> natural
-            }
-            p.place(x, ctx.y, ctx.page.ops)
-            ctx.advance(p.heightMpt)
-        }
-    }
-}
-
-private fun flowText(node: TextNode, x: Int, availW: Int, ctx: Flow, cfg: PageConfig) {
-    val weight = node.style.fontWeight
-    val fs = node.style.fontSize.mpt
-    val lineH = lineHeightMpt(fs, node.style.lineHeightMultiple)
-    val ascent = ctx.book.ascentMpt(weight, fs)
-    val lines = LineBreaker.wrap(node.text, weight, fs, availW, ctx.book)
-    // Keep-together: a paragraph that fits on a page is moved whole rather than leaving a sliver. A
-    // height saturated past `Int` is taller than any page, so it flows line by line instead.
-    val totalH = satMul(lines.size, lineH)
-    if (cfg.keepBlocksTogether && ctx.y > ctx.topY && ctx.overflows(totalH) && totalH <= ctx.usableBottom - ctx.topY) {
-        ctx.newPage()
-    }
-    for (line in lines) {
-        if (ctx.overflows(lineH) && ctx.y > ctx.topY) ctx.newPage()
-        if (line.isNotEmpty()) {
-            val lw = ctx.book.measureWidthMpt(line, weight, fs)
-            val lx = when (node.style.align) {
-                TextAlign.Start -> x
-                TextAlign.Center -> x + halfTrunc(availW - lw)
-                TextAlign.End -> x + (availW - lw)
-            }
-            ctx.book.placeLine(line, weight, fs, node.style.color, lx, ctx.y + ascent, ctx.page.ops)
-        }
-        ctx.advance(lineH)
-    }
-}
-
-private fun flowTable(node: TableNode, x: Int, availW: Int, ctx: Flow, cfg: PageConfig) {
-    val colWidths = tableColumnWidths(node.columns, availW)
-    val headerCells = node.columns.map { it.header }
-    val aligns = node.columns.map { it.align }
-    val headerH = tableRowHeight(headerCells, node.headerStyle, colWidths, node.cellPadHMpt, node.cellPadVMpt, ctx.book)
-    fun placeHeader() {
-        if (ctx.overflows(headerH) && ctx.y > ctx.topY) ctx.newPage()
-        drawTableRow(headerCells, node.headerStyle, aligns, x, ctx.y, headerH, colWidths, node.cellPadHMpt, node.cellPadVMpt, node.headerBackground, node.gridColor, ctx.book, ctx.page.ops)
-        ctx.advance(headerH)
-    }
-    placeHeader()
-    for (row in node.rows) {
-        val rh = tableRowHeight(row.cells, row.style, colWidths, node.cellPadHMpt, node.cellPadVMpt, ctx.book)
-        if (ctx.overflows(rh) && ctx.y > ctx.topY) {
-            ctx.newPage()
-            if (node.repeatHeader) placeHeader()
-        }
-        drawTableRow(row.cells, row.style, aligns, x, ctx.y, rh, colWidths, node.cellPadHMpt, node.cellPadVMpt, row.background, node.gridColor, ctx.book, ctx.page.ops)
-        ctx.advance(rh)
     }
 }

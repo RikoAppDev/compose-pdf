@@ -252,4 +252,24 @@ internal class FontBook(
 
     fun usedGids(w: FontWeight): Set<Int> = usedFor(w)
     fun gidToCp(w: FontWeight): Map<Int, Int> = gidMapFor(w)
+
+    /**
+     * Restores the used glyphs, their code points and the emoji cache to their contents now. Emoji
+     * images already appended to the image table stay there; the layout drops the undrawn ones. The
+     * embedded subset and ToUnicode read these by content (sorted gids, lookups), so restored
+     * contents give the same bytes.
+     */
+    override fun checkpoint(): () -> Unit {
+        val sets = listOf(usedRegular, usedBold, usedMedium)
+        val maps = listOf(gidToCpRegular, gidToCpBold, gidToCpMedium)
+        val savedSets = sets.map { HashSet(it) }
+        val savedMaps = maps.map { HashMap(it) }
+        val savedEmoji = HashMap(emojiGlobalIndex)
+        return {
+            for ((live, saved) in sets.zip(savedSets)) { live.clear(); live.addAll(saved) }
+            for ((live, saved) in maps.zip(savedMaps)) { live.clear(); live.putAll(saved) }
+            emojiGlobalIndex.clear()
+            emojiGlobalIndex.putAll(savedEmoji)
+        }
+    }
 }

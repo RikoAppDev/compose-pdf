@@ -85,35 +85,7 @@ internal fun measure(node: Node, availWidthMpt: Int, book: TextMetrics): Placeab
     }
 
     is RowNode -> {
-        val n = node.children.size
-        val totalGap = if (n > 1) satMul(node.gapMpt, n - 1) else 0
-        val avail = (availWidthMpt.toLong() - totalGap).coerceAtLeast(0L).saturatedToInt()
-        val widths = IntArray(n)
-        // Content-sized cells (weight <= 0) take their intrinsic width first.
-        var autoUsed = 0
-        for (i in 0 until n) {
-            if (node.children[i].weight <= 0f) {
-                widths[i] = intrinsicWidth(node.children[i].node, book).coerceIn(0, avail - autoUsed)
-                autoUsed += widths[i]
-            }
-        }
-        // Weighted cells split whatever width is left: each share truncated to whole points (Float ×
-        // weight / Double total, as in 0.10.0), the remainder — fractional or not — to the last one.
-        val weightedAvail = (avail - autoUsed).coerceAtLeast(0)
-        val weightedAvailPt = weightedAvail / MPT_PER_PT.toFloat()
-        val totalWeight = node.children.sumOf { (if (it.weight > 0f) it.weight else 0f).toDouble() }
-        if (totalWeight > 0.0) {
-            var used = 0
-            var lastWeighted = -1
-            for (i in 0 until n) {
-                if (node.children[i].weight > 0f) {
-                    widths[i] = ((weightedAvailPt * node.children[i].weight) / totalWeight).toInt() * MPT_PER_PT
-                    used += widths[i]
-                    lastWeighted = i
-                }
-            }
-            widths[lastWeighted] += (weightedAvail - used) // rounding remainder → last weighted cell
-        }
+        val widths = rowCellWidths(node, availWidthMpt, book)
         val measured = node.children.mapIndexed { i, c -> measure(c.node, widths[i], book) }
         val h = measured.maxOfOrNull { it.heightMpt } ?: 0
         Placeable(availWidthMpt, h) { x, y, out ->
@@ -131,10 +103,11 @@ internal fun measure(node: Node, availWidthMpt: Int, book: TextMetrics): Placeab
     }
 
     is BoxNode -> {
-        val pad = node.paddingMpt
-        val innerW = (availWidthMpt - 2 * pad).coerceAtLeast(0)
+        val padH = node.padHMpt
+        val padV = node.padVMpt
+        val innerW = (availWidthMpt - 2 * padH).coerceAtLeast(0)
         val childP = measure(node.child, innerW, book)
-        val boxH = (childP.heightMpt.toLong() + 2L * pad).saturatedToInt()
+        val boxH = (childP.heightMpt.toLong() + 2L * padV).saturatedToInt()
         Placeable(availWidthMpt, boxH) { x, y, out ->
             if (node.background != null) {
                 out.add(RectOp(x, y, availWidthMpt, boxH, fill = node.background, stroke = null, strokeWidthMpt = 0, cornerRadiusMpt = node.cornerRadiusMpt))
@@ -142,7 +115,7 @@ internal fun measure(node: Node, availWidthMpt: Int, book: TextMetrics): Placeab
             if (node.borderMpt > 0) {
                 out.add(RectOp(x, y, availWidthMpt, boxH, fill = null, stroke = node.borderColor, strokeWidthMpt = node.borderMpt, cornerRadiusMpt = node.cornerRadiusMpt))
             }
-            childP.place(x + pad, y + pad, out)
+            childP.place(x + padH, y + padV, out)
         }
     }
 
@@ -164,6 +137,44 @@ internal fun measure(node: Node, availWidthMpt: Int, book: TextMetrics): Placeab
             }
         }
     }
+}
+
+/**
+ * Cell widths of [node] against [availWidthMpt]: content-sized cells (weight <= 0) take their
+ * intrinsic width first, weighted cells split the rest, the rounding remainder goes to the last
+ * weighted cell. Shared by [measure] and the flow.
+ */
+internal fun rowCellWidths(node: RowNode, availWidthMpt: Int, book: TextMetrics): IntArray {
+    val n = node.children.size
+    val totalGap = if (n > 1) satMul(node.gapMpt, n - 1) else 0
+    val avail = (availWidthMpt.toLong() - totalGap).coerceAtLeast(0L).saturatedToInt()
+    val widths = IntArray(n)
+    // Content-sized cells (weight <= 0) take their intrinsic width first.
+    var autoUsed = 0
+    for (i in 0 until n) {
+        if (node.children[i].weight <= 0f) {
+            widths[i] = intrinsicWidth(node.children[i].node, book).coerceIn(0, avail - autoUsed)
+            autoUsed += widths[i]
+        }
+    }
+    // Weighted cells split whatever width is left: each share truncated to whole points (Float ×
+    // weight / Double total, as in 0.10.0), the remainder — fractional or not — to the last one.
+    val weightedAvail = (avail - autoUsed).coerceAtLeast(0)
+    val weightedAvailPt = weightedAvail / MPT_PER_PT.toFloat()
+    val totalWeight = node.children.sumOf { (if (it.weight > 0f) it.weight else 0f).toDouble() }
+    if (totalWeight > 0.0) {
+        var used = 0
+        var lastWeighted = -1
+        for (i in 0 until n) {
+            if (node.children[i].weight > 0f) {
+                widths[i] = ((weightedAvailPt * node.children[i].weight) / totalWeight).toInt() * MPT_PER_PT
+                used += widths[i]
+                lastWeighted = i
+            }
+        }
+        widths[lastWeighted] += (weightedAvail - used) // rounding remainder → last weighted cell
+    }
+    return widths
 }
 
 /**
@@ -193,6 +204,6 @@ internal fun intrinsicWidth(node: Node, book: TextMetrics): Int = when (node) {
         val gaps = if (node.children.size > 1) node.gapMpt.toLong() * (node.children.size - 1) else 0L
         (node.children.sumOf { intrinsicWidth(it.node, book).toLong() } + gaps).saturatedToInt()
     }
-    is BoxNode -> (intrinsicWidth(node.child, book).toLong() + 2L * node.paddingMpt).saturatedToInt()
+    is BoxNode -> (intrinsicWidth(node.child, book).toLong() + 2L * node.padHMpt).saturatedToInt()
     is TableNode -> 0
 }
